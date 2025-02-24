@@ -4,3 +4,8 @@ numpy
 matplotlib
 seaborn
 streamlit
+scipy
+opencv-python
+textblob
+scikit-learn
+plotly
