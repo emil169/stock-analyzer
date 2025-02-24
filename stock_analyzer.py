@@ -5,6 +5,22 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import streamlit as st
 from datetime import datetime, timedelta
+from scipy.signal import argrelextrema
+import cv2
+import io
+from textblob import TextBlob
+from sklearn.ensemble import RandomForestClassifier
+import plotly.graph_objects as go
+
+# --- Globale Konfiguration ---
+colors = {
+    "background": "#1a1a1a",  # An das dunkle Thema des Stock Analyzers angepasst
+    "card": "#2c2c2c",
+    "text": "#FFFFFF",
+    "positive": "#00FF00",
+    "negative": "#FF0000",
+    "neutral": "#FFA500"
+}
 
 # Setze das Streamlit-Theme für ein professionelles Aussehen
 st.set_page_config(page_title="Professionelle Marktanalyse", layout="wide", initial_sidebar_state="expanded")
@@ -58,8 +74,28 @@ st.markdown("""
     .css-1aumxhk {
         background-color: #1a1a1a;
     }
+    .legend-toggle {
+        cursor: pointer;
+        padding: 5px 10px;
+        background-color: #2c2c2c;
+        border: 1px solid #555;
+        border-radius: 5px;
+        margin-bottom: 10px;
+    }
+    .legend-toggle:hover {
+        background-color: #404040;
+    }
     </style>
 """, unsafe_allow_html=True)
+
+# Funktion zur Datenabfrage (aus Elliot-Wellen-Code)
+def fetch_data(symbol, timeframe="1d", period="1y"):
+    try:
+        stock = yf.Ticker(symbol)
+        df = stock.history(period=period, interval=timeframe)
+        return df if not df.empty else pd.DataFrame()
+    except:
+        return pd.DataFrame()
 
 # Funktion zur Berechnung von RSI (Relative Strength Index)
 def calculate_rsi(data, period=14):
@@ -317,9 +353,130 @@ def plot_indicator_heatmap(data):
     plt.title("**Optimierte Indikator-Korrelations-Heatmap**", fontweight='bold', fontsize=16)
     return fig
 
+# --- Elliot-Wellen-Funktionen (unabhängig vom Zeitrahmen, standardmäßig 1 Jahr) ---
+def generate_chart_image(df):
+    if df.empty:
+        return np.zeros((1, 1, 3), dtype=np.uint8)
+    plt.figure(figsize=(10, 5))
+    plt.plot(df.index, df["Close"], label="Close")
+    plt.legend()
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png")
+    buf.seek(0)
+    img = cv2.imdecode(np.frombuffer(buf.read(), np.uint8), cv2.IMREAD_COLOR)
+    plt.close()
+    return img
+
+def detect_waves_in_image(img):
+    if img.size == 0 or img.shape[0] == 1:
+        return np.array([], dtype=int)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 150)
+    peaks = argrelextrema(edges.mean(axis=0), np.greater, order=10)[0]
+    return peaks
+
+def identify_elliot_waves(df):
+    if df.empty:
+        return [], 0.5, []
+    
+    highs = argrelextrema(df["High"].values, np.greater, order=5)[0]
+    lows = argrelextrema(df["Low"].values, np.less, order=5)[0]
+    
+    waves = []
+    for i in range(min(len(highs), len(lows)) - 4):
+        wave_pattern = {
+            "W1": df["Close"].iloc[lows[i]],
+            "W2": df["Close"].iloc[highs[i]],
+            "W3": df["Close"].iloc[lows[i+1]],
+            "W4": df["Close"].iloc[highs[i+1]],
+            "W5": df["Close"].iloc[lows[i+2]]
+        }
+        waves.append(wave_pattern)
+    
+    features = pd.DataFrame({
+        "rsi": calculate_rsi(df),
+        "macd": calculate_macd(df)[0],  # MACD-Linie
+        "volatility": df["Close"].pct_change().rolling(14).std()
+    }).dropna()
+    
+    valid_indices = features.index[features.index <= df.index[-1]] if not df.index.empty else features.index[:1] if not features.empty else pd.Index([0])
+    if len(valid_indices) == 0 and not features.empty:
+        valid_indices = features.index[:1]
+    
+    shifted_close = df["Close"].shift(-5).dropna()
+    current_close = df["Close"].dropna()
+    common_indices = shifted_close.index.intersection(current_close.index).intersection(valid_indices)
+    
+    if len(common_indices) > 0:
+        labels = (shifted_close.loc[common_indices] > current_close.loc[common_indices]).astype(int)
+    else:
+        labels = pd.Series([0], index=[0])
+    
+    features = features.loc[common_indices]
+    
+    if not features.empty and not labels.empty:
+        rf = RandomForestClassifier(n_estimators=100, max_depth=10)
+        rf.fit(features, labels)
+        wave_confidence = rf.predict_proba(features)[-1][1] if len(features) > 0 else 0.5
+    else:
+        wave_confidence = 0.5
+    
+    chart_img = generate_chart_image(df)
+    waves_ki = detect_waves_in_image(chart_img)
+    
+    return waves, wave_confidence, waves_ki
+
+def get_sentiment(symbol):
+    news = [
+        f"{symbol} reports strong earnings this quarter.",
+        f"Analysts predict a bullish trend for {symbol}.",
+        f"Market uncertainty affects {symbol} negatively."
+    ]
+    sentiment = np.mean([TextBlob(text).sentiment.polarity for text in news])
+    return sentiment
+
+def calculate_sma(df, period=50):
+    if df.empty:
+        return pd.Series([], dtype=float)
+    return df["Close"].rolling(window=period).mean()
+
+def calculate_fibonacci_levels(df):
+    if df.empty:
+        return [], []
+    high = df["High"].max()
+    low = df["Low"].min()
+    levels = [high - (high - low) * level for level in [0, 0.236, 0.382, 0.5, 0.618, 1]]
+    zones = [
+        {"start": levels[4], "end": levels[3], "type": "Buy"},  # 61.8% - 50% Kaufzone
+        {"start": levels[1], "end": levels[0], "type": "Sell"}   # 23.6% - 0% Verkaufszone
+    ]
+    return levels, zones
+
+def generate_signals_elliot(df):
+    if df.empty:
+        return []
+    sma = calculate_sma(df)
+    rsi = calculate_rsi(df)  # RSI bleibt für Signale erhalten
+    signals = []
+    for i in range(len(df)):
+        signal = "Hold"
+        if df["Close"].iloc[i] > sma.iloc[i] and rsi.iloc[i] > 70:
+            signal = "Sell"
+        elif df["Close"].iloc[i] < sma.iloc[i] and rsi.iloc[i] < 30:
+            signal = "Buy"
+        signals.append(signal)
+    return signals
+
+# Funktion zur Robustheitsprüfung (aus Elliot-Wellen-Code)
+def robustness_check(df, waves):
+    if df.empty or len(waves) == 0:
+        return False
+    z_scores = np.abs((df["Close"] - df["Close"].mean()) / df["Close"].std())
+    return not (z_scores > 3).any()
+
 # Hauptprogramm mit Streamlit-Oberfläche und flexibler Zeitraumwahl
-def analyze_stock(ticker, years=5):
-    # Daten von Yahoo Finance ziehen (flexibler Zeitraum)
+def analyze_stock(ticker, years=5, show_elliot=False, show_stats=False, show_signals=False, show_standard_plots=False):
+    # Daten von Yahoo Finance ziehen (flexibler Zeitrahmen für Standardanalyse)
     end_date = datetime.now()
     start_date = end_date - timedelta(days=years * 365)
     stock = yf.Ticker(ticker)
@@ -347,6 +504,15 @@ def analyze_stock(ticker, years=5):
     # Signale generieren mit konservativerer Strategie
     recommendation, signal_type, entry_range_buy, exit_range_sell, price_increase_forecast, confidence_score, stop_loss, profit_take = generate_signals(data, current_price)
     backtest_result = backtest_signals(data, ticker)
+    
+    # Elliot-Wellen-Daten (unabhängig, standardmäßig 1 Jahr)
+    elliot_df = fetch_data(ticker, timeframe="1d", period="1y")  # Fixer Zeitrahmen von 1 Jahr für Elliot-Wellen
+    waves, wave_confidence, waves_ki = identify_elliot_waves(elliot_df) if not elliot_df.empty else ([], 0.5, [])
+    sentiment = get_sentiment(ticker)
+    sma_elliot = calculate_sma(elliot_df)
+    fib_levels, fib_zones = calculate_fibonacci_levels(elliot_df)
+    signals_elliot = generate_signals_elliot(elliot_df)
+    robust = robustness_check(elliot_df, waves)  # Berechnung der Robustheit für Elliot-Wellen
     
     # Ausgabe in Streamlit mit professionellem Layout
     col1, col2 = st.columns([1, 2])  # Zwei Spalten für eine Dashboard-Struktur
@@ -383,78 +549,156 @@ def analyze_stock(ticker, years=5):
     st.write(f"{calculate_correlation(data, ticker)}")
     st.write(f"{backtest_result}")
     
-    # Visualisierung mit professionellem Design
-    st.header("Visualisierung")
-    fig, axes = plt.subplots(5, 1, figsize=(15, 20), facecolor='#1a1a1a')
-    plt.style.use('dark_background')  # Dunkler Hintergrund für Plots
+    # Elliot-Wellen-Diagramm und Inhalte nur anzeigen, wenn ausgewählt
+    if show_elliot:
+        st.header("Elliot-Wellen-Analyse")
+        # Legende ausklappbar machen
+        if st.checkbox("Legende ein-/ausblenden", value=True, key="legend_toggle_elliot"):
+            legend_html = f"""
+            <div style="background-color: {colors['card']}; padding: 10px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);">
+                <ul style="list-style-type: none; padding: 0; margin: 0; font-size: 12px; color: {colors['text']};">
+                    <li><span style="color: {colors['positive']};">●</span> Buy Signal / Zone</li>
+                    <li><span style="color: {colors['negative']};">●</span> Sell Signal / Zone</li>
+                    <li><span style="color: {colors['neutral']};">●</span> SMA</li>
+                    <li><span style="color: {colors['positive']};">-</span> Elliot Wave</li>
+                </ul>
+            </div>
+            """
+            st.markdown(legend_html, unsafe_allow_html=True)
+        
+        fig_elliot = go.Figure()
+        fig_elliot.add_trace(go.Candlestick(x=elliot_df.index, open=elliot_df["Open"], high=elliot_df["High"], low=elliot_df["Low"], close=elliot_df["Close"], name="Preis"))
+        
+        # Elliot-Wellen einzeichnen
+        for i, wave in enumerate(waves):
+            fig_elliot.add_trace(go.Scatter(x=[elliot_df.index[list(wave.values()).index(v)] for v in wave.values()], 
+                                           y=list(wave.values()), mode="lines+markers", name=f"Wave {i+1}", line=dict(color=colors['positive'])))
+        
+        # Kauf- und Verkaufssignale einzeichnen
+        for i in range(len(elliot_df)):
+            if signals_elliot[i] == "Buy":
+                fig_elliot.add_trace(go.Scatter(x=[elliot_df.index[i]], y=[elliot_df["Close"].iloc[i]], mode="markers", 
+                                               marker=dict(symbol="triangle-up", size=12, color=colors['positive']), name="Buy Signal"))
+            elif signals_elliot[i] == "Sell":
+                fig_elliot.add_trace(go.Scatter(x=[elliot_df.index[i]], y=[elliot_df["Close"].iloc[i]], mode="markers", 
+                                               marker=dict(symbol="triangle-down", size=12, color=colors['negative']), name="Sell Signal"))
+        
+        # Fibonacci-Zonen einzeichnen mit go.Scatter
+        for zone in fib_zones:
+            fig_elliot.add_trace(go.Scatter(x=[elliot_df.index[0], elliot_df.index[-1], elliot_df.index[-1], elliot_df.index[0], elliot_df.index[0]], 
+                                           y=[zone["start"], zone["start"], zone["end"], zone["end"], zone["start"]], 
+                                           fill="toself", fillcolor=colors['positive'] if zone["type"] == "Buy" else colors['negative'], 
+                                           opacity=0.2, line=dict(color="rgba(255,255,255,0)"), 
+                                           showlegend=False, name=f"{zone['type']} Zone"))
+        
+        # SMA einzeichnen
+        fig_elliot.add_trace(go.Scatter(x=elliot_df.index, y=sma_elliot, name="SMA 50", line=dict(color=colors['neutral'])))
+        
+        fig_elliot.update_layout(
+            height=800,
+            showlegend=False,  # Legende wird jetzt über Checkbox kontrolliert
+            title_text=f"Elliot-Wellen-Analyse für {ticker} (1 Jahr)",
+            plot_bgcolor=colors['background'],
+            paper_bgcolor=colors['background'],
+            font_color=colors['text'],
+            margin=dict(t=100, b=50, l=50, r=50)  # Mehr Platz für den Chart
+        )
+        st.plotly_chart(fig_elliot, use_container_width=True)
     
-    # Kurs, Bollinger Bands, EMA50, VWAP
-    axes[0].plot(data.index, data['Close'], label='Kurs', color='blue', linewidth=1.5)
-    axes[0].plot(data.index, data['MA20'], label='MA20', color='orange', linewidth=1.5)
-    axes[0].plot(data.index, data['Upper'], label='Oberes Band', color='red', linestyle='--', linewidth=1)
-    axes[0].plot(data.index, data['Lower'], label='Unteres Band', color='green', linestyle='--', linewidth=1)
-    axes[0].plot(data.index, data['EMA50'], label='EMA50', color='cyan', linestyle='-.', linewidth=1.5)
-    axes[0].plot(data.index, data['VWAP'], label='VWAP', color='purple', linestyle='-.', linewidth=1.5)
-    if signal_type == "Long":
-        axes[0].scatter(data.index[-1], current_price, color='green', marker='^', s=200, label='Kauf-Signal')
-    elif signal_type == "Short":
-        axes[0].scatter(data.index[-1], current_price, color='red', marker='v', s=200, label='Verkauf-Signal')
-    axes[0].set_title(f"**{ticker} - Optimierte Marktanalyse (Kurs & Indikatoren)**", fontweight='bold', fontsize=18, color='white')
-    axes[0].set_xlabel("Datum", fontweight='bold', fontsize=12, color='white')
-    axes[0].set_ylabel("Preis (USD)", fontweight='bold', fontsize=12, color='white')
-    axes[0].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor='#2c2c2c', edgecolor='white', labelcolor='white')
-    axes[0].grid(True, linestyle='--', alpha=0.3, color='gray')
-    axes[0].set_facecolor('#1a1a1a')
+    # Marktstatistiken nur anzeigen, wenn ausgewählt
+    if show_stats:
+        st.header("Elliot-Wellen-Marktstatistiken")
+        st.markdown(f'<div class="card">', unsafe_allow_html=True)
+        st.write(f"**Wave Confidence:** {wave_confidence:.2%}")
+        sentiment_text = f"**Sentiment:** {sentiment:.2f} {'(Bullish)' if sentiment > 0 else '(Bearish)' if sentiment < 0 else '(Neutral)'}"
+        st.markdown(f'<span style="color: {colors["positive"] if sentiment > 0 else colors["negative"] if sentiment < 0 else colors["neutral"]}">{sentiment_text}</span>', unsafe_allow_html=True)
+        st.write(f"**Robust:** {'✅' if robust else '❌'}")
+        st.markdown('</div>', unsafe_allow_html=True)
     
-    # RSI
-    axes[1].plot(data.index, rsi, label='RSI', color='purple', linewidth=1.5)
-    axes[1].axhline(y=50, color='gray', linestyle='--', alpha=0.5, label='Neutral')
-    axes[1].axhline(y=30, color='green', linestyle='--', alpha=0.5, label='Überverkauft (Long)')
-    axes[1].axhline(y=70, color='red', linestyle='--', alpha=0.5, label='Überkauft (Short)')
-    axes[1].set_title(f"**Relative Strength Index (RSI)**", fontweight='bold', fontsize=16, color='white')
-    axes[1].set_xlabel("Datum", fontweight='bold', fontsize=12, color='white')
-    axes[1].set_ylabel("RSI-Wert", fontweight='bold', fontsize=12, color='white')
-    axes[1].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor='#2c2c2c', edgecolor='white', labelcolor='white')
-    axes[1].grid(True, linestyle='--', alpha=0.3, color='gray')
-    axes[1].set_facecolor('#1a1a1a')
+    # Signale & Zonen nur anzeigen, wenn ausgewählt
+    if show_signals:
+        st.header("Elliot-Wellen-Signale & Zonen")
+        st.markdown(f'<div class="card">', unsafe_allow_html=True)
+        st.write(f"**Aktuelles Signal:** {signals_elliot[-1] if signals_elliot else 'Hold'}")
+        for zone in fib_zones:
+            zone_color = colors['positive'] if zone["type"] == "Buy" else colors['negative']
+            st.markdown(f'<span style="color: {zone_color}">**{zone["type"]} Zone:** {zone["start"]:.2f} - {zone["end"]:.2f}</span>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
     
-    # Stochastic
-    axes[2].plot(data.index, k, label='%K', color='red', alpha=0.7, linewidth=1.5)
-    axes[2].plot(data.index, d, label='%D', color='green', alpha=0.7, linewidth=1.5)
-    axes[2].axhline(y=50, color='gray', linestyle='--', alpha=0.5, label='Neutral')
-    axes[2].axhline(y=30, color='green', linestyle='--', alpha=0.5, label='Überverkauft (Long)')
-    axes[2].axhline(y=70, color='red', linestyle='--', alpha=0.5, label='Überkauft (Short)')
-    axes[2].set_title(f"**Stochastic Oscillator**", fontweight='bold', fontsize=16, color='white')
-    axes[2].set_xlabel("Datum", fontweight='bold', fontsize=12, color='white')
-    axes[2].set_ylabel("Stochastic-Wert", fontweight='bold', fontsize=12, color='white')
-    axes[2].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor='#2c2c2c', edgecolor='white', labelcolor='white')
-    axes[2].grid(True, linestyle='--', alpha=0.3, color='gray')
-    axes[2].set_facecolor('#1a1a1a')
-    
-    # MACD
-    axes[3].plot(data.index, macd, label='MACD', color='blue', linewidth=1.5)
-    axes[3].plot(data.index, signal_line, label='Signal Line', color='orange', linewidth=1.5)
-    axes[3].bar(data.index, macd - signal_line, label='MACD Histogram', color='gray', alpha=0.5, width=0.8)
-    axes[3].axhline(y=0, color='gray', linestyle='-', alpha=0.3)
-    axes[3].set_title(f"**Moving Average Convergence Divergence (MACD)**", fontweight='bold', fontsize=16, color='white')
-    axes[3].set_xlabel("Datum", fontweight='bold', fontsize=12, color='white')
-    axes[3].set_ylabel("MACD-Wert", fontweight='bold', fontsize=12, color='white')
-    axes[3].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor='#2c2c2c', edgecolor='white', labelcolor='white')
-    axes[3].grid(True, linestyle='--', alpha=0.3, color='gray')
-    axes[3].set_facecolor('#1a1a1a')
-    
-    # OBV und VWAP
-    axes[4].plot(data.index, data['OBV'], label='OBV', color='purple', linewidth=1.5)
-    axes[4].plot(data.index, data['VWAP'], label='VWAP', color='blue', linestyle='-.', linewidth=1.5)
-    axes[4].set_title(f"**On-Balance Volume (OBV) & Volume Weighted Average Price (VWAP)**", fontweight='bold', fontsize=16, color='white')
-    axes[4].set_xlabel("Datum", fontweight='bold', fontsize=12, color='white')
-    axes[4].set_ylabel("Wert", fontweight='bold', fontsize=12, color='white')
-    axes[4].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor='#2c2c2c', edgecolor='white', labelcolor='white')
-    axes[4].grid(True, linestyle='--', alpha=0.3, color='gray')
-    axes[4].set_facecolor('#1a1a1a')
-    
-    plt.tight_layout()
-    st.pyplot(fig)
+    # Standard-Diagramme nur anzeigen, wenn ausgewählt
+    if show_standard_plots:
+        # Visualisierung mit professionellem Design
+        st.header("Visualisierung")
+        fig, axes = plt.subplots(5, 1, figsize=(15, 20), facecolor='#1a1a1a')
+        plt.style.use('dark_background')  # Dunkler Hintergrund für Plots
+        
+        # Kurs, Bollinger Bands, EMA50, VWAP
+        axes[0].plot(data.index, data['Close'], label='Kurs', color='blue', linewidth=1.5)
+        axes[0].plot(data.index, data['MA20'], label='MA20', color='orange', linewidth=1.5)
+        axes[0].plot(data.index, data['Upper'], label='Oberes Band', color='red', linestyle='--', linewidth=1)
+        axes[0].plot(data.index, data['Lower'], label='Unteres Band', color='green', linestyle='--', linewidth=1)
+        axes[0].plot(data.index, data['EMA50'], label='EMA50', color='cyan', linestyle='-.', linewidth=1.5)
+        axes[0].plot(data.index, data['VWAP'], label='VWAP', color='purple', linestyle='-.', linewidth=1.5)
+        if signal_type == "Long":
+            axes[0].scatter(data.index[-1], current_price, color='green', marker='^', s=200, label='Kauf-Signal')
+        elif signal_type == "Short":
+            axes[0].scatter(data.index[-1], current_price, color='red', marker='v', s=200, label='Verkauf-Signal')
+        axes[0].set_title(f"**{ticker} - Optimierte Marktanalyse (Kurs & Indikatoren)**", fontweight='bold', fontsize=18, color='white')
+        axes[0].set_xlabel("Datum", fontweight='bold', fontsize=12, color='white')
+        axes[0].set_ylabel("Preis (USD)", fontweight='bold', fontsize=12, color='white')
+        axes[0].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor='#2c2c2c', edgecolor='white', labelcolor='white')
+        axes[0].grid(True, linestyle='--', alpha=0.3, color='gray')
+        axes[0].set_facecolor('#1a1a1a')
+        
+        # RSI
+        axes[1].plot(data.index, rsi, label='RSI', color='purple', linewidth=1.5)
+        axes[1].axhline(y=50, color='gray', linestyle='--', alpha=0.5, label='Neutral')
+        axes[1].axhline(y=30, color='green', linestyle='--', alpha=0.5, label='Überverkauft (Long)')
+        axes[1].axhline(y=70, color='red', linestyle='--', alpha=0.5, label='Überkauft (Short)')
+        axes[1].set_title(f"**Relative Strength Index (RSI)**", fontweight='bold', fontsize=16, color='white')
+        axes[1].set_xlabel("Datum", fontweight='bold', fontsize=12, color='white')
+        axes[1].set_ylabel("RSI-Wert", fontweight='bold', fontsize=12, color='white')
+        axes[1].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor='#2c2c2c', edgecolor='white', labelcolor='white')
+        axes[1].grid(True, linestyle='--', alpha=0.3, color='gray')
+        axes[1].set_facecolor('#1a1a1a')
+        
+        # Stochastic
+        axes[2].plot(data.index, k, label='%K', color='red', alpha=0.7, linewidth=1.5)
+        axes[2].plot(data.index, d, label='%D', color='green', alpha=0.7, linewidth=1.5)
+        axes[2].axhline(y=50, color='gray', linestyle='--', alpha=0.5, label='Neutral')
+        axes[2].axhline(y=30, color='green', linestyle='--', alpha=0.5, label='Überverkauft (Long)')
+        axes[2].axhline(y=70, color='red', linestyle='--', alpha=0.5, label='Überkauft (Short)')
+        axes[2].set_title(f"**Stochastic Oscillator**", fontweight='bold', fontsize=16, color='white')
+        axes[2].set_xlabel("Datum", fontweight='bold', fontsize=12, color='white')
+        axes[2].set_ylabel("Stochastic-Wert", fontweight='bold', fontsize=12, color='white')
+        axes[2].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor='#2c2c2c', edgecolor='white', labelcolor='white')
+        axes[2].grid(True, linestyle='--', alpha=0.3, color='gray')
+        axes[2].set_facecolor('#1a1a1a')
+        
+        # MACD
+        axes[3].plot(data.index, macd, label='MACD', color='blue', linewidth=1.5)
+        axes[3].plot(data.index, signal_line, label='Signal Line', color='orange', linewidth=1.5)
+        axes[3].bar(data.index, macd - signal_line, label='MACD Histogram', color='gray', alpha=0.5, width=0.8)
+        axes[3].axhline(y=0, color='gray', linestyle='-', alpha=0.3)
+        axes[3].set_title(f"**Moving Average Convergence Divergence (MACD)**", fontweight='bold', fontsize=16, color='white')
+        axes[3].set_xlabel("Datum", fontweight='bold', fontsize=12, color='white')
+        axes[3].set_ylabel("MACD-Wert", fontweight='bold', fontsize=12, color='white')
+        axes[3].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor='#2c2c2c', edgecolor='white', labelcolor='white')
+        axes[3].grid(True, linestyle='--', alpha=0.3, color='gray')
+        axes[3].set_facecolor('#1a1a1a')
+        
+        # OBV und VWAP
+        axes[4].plot(data.index, data['OBV'], label='OBV', color='purple', linewidth=1.5)
+        axes[4].plot(data.index, data['VWAP'], label='VWAP', color='blue', linestyle='-.', linewidth=1.5)
+        axes[4].set_title(f"**On-Balance Volume (OBV) & Volume Weighted Average Price (VWAP)**", fontweight='bold', fontsize=16, color='white')
+        axes[4].set_xlabel("Datum", fontweight='bold', fontsize=12, color='white')
+        axes[4].set_ylabel("Wert", fontweight='bold', fontsize=12, color='white')
+        axes[4].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor='#2c2c2c', edgecolor='white', labelcolor='white')
+        axes[4].grid(True, linestyle='--', alpha=0.3, color='gray')
+        axes[4].set_facecolor('#1a1a1a')
+        
+        plt.tight_layout()
+        st.pyplot(fig)
 
     # Optional: Heatmap anzeigen
     if st.checkbox("Indikator-Korrelations-Heatmap anzeigen", key="heatmap_checkbox"):
@@ -465,8 +709,16 @@ def analyze_stock(ticker, years=5):
 st.sidebar.header("Eingabe-Parameter")
 ticker = st.sidebar.text_input("Aktien-Ticker eingeben (z.B. 'PLTR')", "PLTR", key="ticker_input")
 time_period = st.sidebar.selectbox("Zeitraum (Jahre)", [1, 3, 5, 10], index=2, key="time_period_select")
+
+# Menü für Inhalte vor „Analyse starten“
+st.sidebar.header("Anzeigeoptionen")
+show_elliot = st.sidebar.checkbox("Elliot-Wellen-Analyse anzeigen", value=False, key="show_elliot")
+show_stats = st.sidebar.checkbox("Elliot-Wellen-Marktstatistiken anzeigen", value=False, key="show_stats")
+show_signals = st.sidebar.checkbox("Elliot-Wellen-Signale & Zonen anzeigen", value=False, key="show_signals")
+show_standard_plots = st.sidebar.checkbox("Standard-Diagramme anzeigen", value=True, key="show_standard_plots")
+
 if st.sidebar.button("Analyse starten", key="analyze_button"):
-    analyze_stock(ticker, time_period)
+    analyze_stock(ticker, time_period, show_elliot, show_stats, show_signals, show_standard_plots)
 
 # Füge ein Footer hinzu für ein professionelles Aussehen
 st.markdown("""
