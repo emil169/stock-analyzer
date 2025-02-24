@@ -6,8 +6,6 @@ import seaborn as sns
 import streamlit as st
 from datetime import datetime, timedelta
 from scipy.signal import argrelextrema
-import cv2
-import io
 from textblob import TextBlob
 from sklearn.ensemble import RandomForestClassifier
 import plotly.graph_objects as go
@@ -353,28 +351,7 @@ def plot_indicator_heatmap(data):
     plt.title("**Optimierte Indikator-Korrelations-Heatmap**", fontweight='bold', fontsize=16)
     return fig
 
-# --- Elliot-Wellen-Funktionen (unabhängig vom Zeitrahmen, standardmäßig 1 Jahr) ---
-def generate_chart_image(df):
-    if df.empty:
-        return np.zeros((1, 1, 3), dtype=np.uint8)
-    plt.figure(figsize=(10, 5))
-    plt.plot(df.index, df["Close"], label="Close")
-    plt.legend()
-    buf = io.BytesIO()
-    plt.savefig(buf, format="png")
-    buf.seek(0)
-    img = cv2.imdecode(np.frombuffer(buf.read(), np.uint8), cv2.IMREAD_COLOR)
-    plt.close()
-    return img
-
-def detect_waves_in_image(img):
-    if img.size == 0 or img.shape[0] == 1:
-        return np.array([], dtype=int)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 50, 150)
-    peaks = argrelextrema(edges.mean(axis=0), np.greater, order=10)[0]
-    return peaks
-
+# --- Elliot-Wellen-Funktionen (unabhängig vom Zeitrahmen, standardmäßig 1 Jahr, ohne Bildverarbeitung) ---
 def identify_elliot_waves(df):
     if df.empty:
         return [], 0.5, []
@@ -421,10 +398,8 @@ def identify_elliot_waves(df):
     else:
         wave_confidence = 0.5
     
-    chart_img = generate_chart_image(df)
-    waves_ki = detect_waves_in_image(chart_img)
-    
-    return waves, wave_confidence, waves_ki
+    # Entferne den Bildverarbeitungsanteil (waves_ki wird nicht mehr benötigt)
+    return waves, wave_confidence, np.array([], dtype=int)
 
 def get_sentiment(symbol):
     news = [
