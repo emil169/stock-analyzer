@@ -6,7 +6,7 @@ import seaborn as sns
 import streamlit as st
 from datetime import datetime, timedelta
 from scipy.signal import argrelextrema
-import cv2
+from PIL import Image
 import io
 from textblob import TextBlob
 from sklearn.ensemble import RandomForestClassifier
@@ -374,23 +374,28 @@ def plot_indicator_heatmap(data):
 # --- Elliot-Wellen-Funktionen ---
 def generate_chart_image(df):
     if df.empty:
-        return np.zeros((1, 1, 3), dtype=np.uint8)
+        return None  # Rückgabe None, wenn DataFrame leer ist
     plt.figure(figsize=(10, 5))
-    plt.plot(df.index, df["Close"], label="Close")
+    plt.plot(df.index, df["Close"], label="Close", color='blue')
     plt.legend()
     buf = io.BytesIO()
-    plt.savefig(buf, format="png")
+    plt.savefig(buf, format="png", facecolor='#1a1a1a', edgecolor='none')  # Dunkelgrauer Hintergrund
     buf.seek(0)
-    img = cv2.imdecode(np.frombuffer(buf.read(), np.uint8), cv2.IMREAD_COLOR)
+    img = Image.open(buf)
     plt.close()
     return img
 
 def detect_waves_in_image(img):
-    if img.size == 0 or img.shape[0] == 1:
+    if img is None or isinstance(img, np.ndarray) and (img.size == 0 or img.shape[0] == 1):
         return np.array([], dtype=int)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 50, 150)
-    peaks = argrelextrema(edges.mean(axis=0), np.greater, order=10)[0]
+    # Konvertiere das Bild in ein Array, falls es ein PIL-Bild ist
+    if isinstance(img, Image.Image):
+        img_array = np.array(img.convert('L'))  # Graustufenkonvertierung
+    else:
+        img_array = np.array(img)
+    # Führe eine einfache Peaks-Erkennung durch (ähnlich wie mit Canny-Edges, aber ohne cv2)
+    edges = np.gradient(np.mean(img_array, axis=0))
+    peaks = argrelextrema(edges, np.greater, order=10)[0]
     return peaks
 
 def identify_elliot_waves(df, sentiment=0):
