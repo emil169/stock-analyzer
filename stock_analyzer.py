@@ -1,3 +1,6 @@
+from streamlit_lottie import st_lottie
+import requests
+import time
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -15,103 +18,90 @@ from pytz import timezone
 
 # --- Globale Konfiguration ---
 colors = {
-    "background": "#1a1a1a",
-    "card": "#2c2c2c",
-    "text": "#FFFFFF",
-    "positive": "#00FF00",
-    "negative": "#FF0000",
-    "neutral": "#FFA500"
+    "background": "#1A2526",  # Dunkles Blau für Finanzthema
+    "card": "#2E3839",       # Etwas helleres Blau-Grau
+    "text": "#E6ECEC",       # Sanftes Weiß für Lesbarkeit
+    "positive": "#00C897",   # Grün für Gewinne
+    "negative": "#FF5252",   # Rot für Verluste
+    "neutral": "#FFD700",    # Gold für neutrale Akzente
+    "header1": "#FFD700",    # Gold für Haupttitel
+    "header2": "#00BCD4",    # Cyan für Untertitel
+    "header3": "#B0BEC5"     # Leichtes Grau für Subtitel
 }
 
-st.set_page_config(page_title="Professionelle Marktanalyse", layout="wide", initial_sidebar_state="expanded")
+# Definition der Aktien-Clusters (unverändert)
+clusters = {
+    "Tech 33": [
+        "Adobe - ADBE", "AMD - AMD", "Apple - AAPL", "Atlassian - TEAM", "Broadcom - AVGO",
+        "Cisco - CSCO", "Cloudflare - NET", "Coinbase - COIN", "eBay - EBAY", "Electronic Arts - EA",
+        "Google (Alphabet) - GOOGL", "Meta - META", "Microsoft - MSFT", "MicroStrategy - MSTR", "Netflix - NFLX",
+        "NVIDIA - NVDA", "Oracle - ORCL", "Palantir - PLTR", "Palo Alto Networks - PANW", "PayPal - PYPL",
+        "Qualcomm - QCOM", "Salesforce - CRM", "Shopify - SHOP", "Snowflake - SNOW", "Tesla - TSLA",
+        "Texas Instruments - TXN", "Uber - UBER", "Zscaler - ZS"
+    ],
+    "DAX 40": [
+        "Adidas - ADS.DE", "Airbus - AIR.DE", "Allianz - ALV.DE", "BASF - BAS.DE", "Bayer - BAYN.DE",
+        "Beiersdorf - BEI.DE", "BMW - BMW.DE", "Brenntag - BNR.DE", "Commerzbank - CBK.DE", "Continental - CON.DE",
+        "Daimler Truck Holding - DTG.DE", "Deutsche Bank - DBK.DE", "Deutsche Börse - DB1.DE", "Deutsche Telekom - DTE.DE",
+        "DHL Group - DHL.DE", "E.ON - EOAN.DE", "Fresenius - FRE.DE", "Fresenius Medical Care - FME.DE", "Hannover Rück - HNR1.DE",
+        "HeidelbergMaterials - HEI.DE", "Henkel - HEN3.DE", "Infineon Technologies - IFX.DE", "Mercedes Benz Group - MBG.DE",
+        "MTU Aero Engines - MTX.DE", "Munchener Re - MUV2.DE", "Porsche AC - P911.DE", "Porsche Automobil Holding - PAH3.DE",
+        "Qiagen - QIA.DE", "Rheinmetall - RHM.DE", "RWE - RWE.DE", "SAP - SAP.DE", "Sartorius - SRT3.DE",
+        "Siemens - SIE.DE", "Siemens Energy - ENR.DE", "Siemens Healthineers - SHL.DE", "Symrise - SY1.DE",
+        "Vonovia - VNA.DE", "Zalando - ZAL.DE", "Volkswagen - VOW3.DE"
+    ],
+    "US Titans": [
+        "3M - MMM", "American Express - AXP", "Amazon - AMZN", "American Water Works - AWK", "Berkshire Hathaway - BRK-B",
+        "Black Rock - BLK", "Boeing - BA", "Caterpillar - CAT", "Chevron - CVX", "Cisco - CSCO",
+        "Coca-Cola - KO", "Dow Inc - DOW", "Exxon Mobil - XOM", "Goldman Sachs - GS", "Home Depot - HD",
+        "Honeywell - HON", "IBM - IBM", "Johnson & Johnson - JNJ", "JPMorgan Chase - JPM", "Mastercard - MA",
+        "McDonald’s - MCD", "Merck - MRK", "Microsoft - MSFT", "Nike - NKE", "NVIDIA - NVDA",
+        "Occidental Petroleum - OXY", "PepsiCo - PEP", "Procter & Gamble - PG", "Salesforce - CRM", "Starbucks - SBUX",
+        "T-Mobile - TMUS", "Travelers - TRV", "Under Armour - UAA", "UnitedHealth - UNH", "Verizon Communications - VZ",
+        "Visa - V", "Walgreens Boots Alliance - WBA", "Walmart - WMT", "Waste Management - WM", "Walt Disney - DIS",
+        "Warner Bros. - WBD"
+    ],
+    "China Titans": [
+        "Alibaba - BABA", "Baidu - BIDU", "BYD - 1211.HK", "China Life Insurance - 2628.HK", "Geely",
+        "JD - JD", "Miniso - MNSO", "NetEase - NTES", "NIO - NIO", "PDD Holdings - PDD",
+        "Petrochina", "Sino Biopharmaceutical - 1177.HK", "Tencent Music - TME", "WuXi Biologics - 2269.HK", "Xiaomi - 1810.HK", "XPeng - XPEV"
+    ],
+    "Eigene Auswahl": []
+}
 
-st.markdown("""
-    <style>
-    .main {background-color: #1a1a1a; color: #ffffff;}
-    .sidebar .sidebar-content {background-color: #2c2c2c; color: #ffffff;}
-    .sidebar .sidebar-content input, .sidebar .sidebar-content button {background-color: #404040; color: #ffffff; border: 1px solid #555;}
-    .sidebar .sidebar-content button:hover {background-color: #555;}
-    .stButton>button {background-color: #4CAF50; color: white; border-radius: 5px; padding: 10px 20px; font-size: 16px;}
-    .stButton>button:hover {background-color: #45a049;}
-    .stExpander {background-color: #2c2c2c; border: 1px solid #555; border-radius: 5px;}
-    .stExpander > div > div {background-color: #2c2c2c;}
-    .stExpander > div > div > p {color: #ffffff;}
-    .stCheckbox > div > label {color: #ffffff;}
-    h1, h2, h3 {color: #4CAF50 !important;}
-    .css-1aumxhk {background-color: #1a1a1a;}
-    .legend-toggle {cursor: pointer; padding: 5px 10px; background-color: #2c2c2c; border: 1px solid #555; border-radius: 5px; margin-bottom: 10px;}
-    .legend-toggle:hover {background-color: #404040;}
-    </style>
-""", unsafe_allow_html=True)
-
-# Funktion zur Ermittlung des Live-Preises (inkl. Pre-Market/After-Market)
-def get_live_price(symbol):
+# Funktionen (unverändert)
+def get_stock_info(symbol):
     try:
         stock = yf.Ticker(symbol)
-        # Hole die aktuellsten Daten, inklusive Pre-Market/After-Market
         ticker_info = stock.history(period="1d", interval="1m")
+        info = stock.info
         if not ticker_info.empty:
             current_price = ticker_info['Close'].iloc[-1]
-            # Prüfe auf Pre-Market/After-Market-Daten
             pre_market = stock.pre_market_price if hasattr(stock, 'pre_market_price') and stock.pre_market_price else None
             after_market = stock.after_hours_price if hasattr(stock, 'after_hours_price') and stock.after_hours_price else None
-            
             price_display = f"{current_price:.2f} USD"
-            if pre_market and datetime.now().hour < 9:  # Pre-Market (vor 9:30 EST)
+            if pre_market and datetime.now().hour < 9:
                 price_display = f"Pre-Market: {pre_market:.2f} USD"
-            elif after_market and datetime.now().hour >= 16:  # After-Market (nach 16:00 EST)
+            elif after_market and datetime.now().hour >= 16:
                 price_display = f"After-Market: {after_market:.2f} USD"
-            return current_price, price_display
+            return {
+                "current_price": current_price, "price_display": price_display,
+                "day_range": f"{info.get('dayLow', 0):.2f} – {info.get('dayHigh', 0):.2f} USD",
+                "avg_volume": f"{info.get('averageVolume', 0):,.0f}",
+                "market_cap": f"{info.get('marketCap', 0):,.0f} USD",
+                "pe_ratio": f"{info.get('trailingPE', 0):.2f}" if info.get('trailingPE') else "Nicht verfügbar",
+                "beta": f"{info.get('beta', 0):.2f}" if info.get('beta') else "Nicht verfügbar"
+            }
         return None, "Keine aktuellen Daten verfügbar"
     except Exception as e:
-        return None, f"Fehler beim Abrufen des Preises: {str(e)}"
+        return None, f"Fehler beim Abrufen der Daten: {str(e)}"
 
-# Funktion zur Bereinigung von Lücken (nur reguläre Handelstage, 9:30–16:00 EST, aktueller Tag)
 def clean_trading_data(df):
-    if df.empty:
-        return df
-    # Entferne Lücken und behalte nur Handelstage (entferne nicht-handelszeitliche Daten)
+    if df.empty: return df
     df = df.dropna()
-    # Sicherstellen, dass nur Daten während der regulären Handelszeiten des aktuellen Datums enthalten sind (9:30–16:00 EST)
     today = datetime.now(timezone('America/New_York')).replace(hour=0, minute=0, second=0, microsecond=0)
-    df = df[df.index.date == today.date()].between_time('09:30', '16:00', inclusive='both')
-    return df
+    return df[df.index.date == today.date()].between_time('09:30', '16:00', inclusive='both')
 
-# Funktion zur Erstellung eines kontinuierlichen Datensatzes für 1-Minuten-Intervalle, nur für den aktuellen Tag und Handelszeiten
-def create_continuous_1m_data(df, period_days=1):
-    if df.empty:
-        return pd.DataFrame()
-    
-    # Hole das aktuelle Datum mit Zeitzone America/New_York
-    current_date = datetime.now(timezone('America/New_York'))
-    today = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    # Erstelle einen vollständigen 1-Minuten-Index für den aktuellen Tag, nur für Handelszeiten (9:30–16:00 EST)
-    start_time = today.replace(hour=9, minute=30, second=0)
-    end_time = today.replace(hour=16, minute=0, second=0)
-    date_range = pd.date_range(start=start_time, end=end_time, freq='1min', tz='America/New_York')
-    continuous_df = pd.DataFrame(index=date_range)
-    
-    # Konvertiere den Index von df in die gleiche Zeitzone, falls nicht schon vorhanden
-    if df.index.tz is None:
-        df.index = df.index.tz_localize('America/New_York')
-    else:
-        df.index = df.index.tz_convert('America/New_York')
-    
-    # Filtere df auf den aktuellen Tag
-    df_today = df[df.index.date == today.date()]
-    
-    # Füge die verfügbaren Daten hinzu und fülle fehlende Werte mit den letzten bekannten Werten oder 0
-    required_columns = ["Open", "High", "Low", "Close", "Volume"]
-    for col in required_columns:
-        if col in df_today.columns:
-            continuous_df[col] = df_today[col].reindex(date_range, method='ffill').fillna(0)
-        else:
-            continuous_df[col] = 0  # Standardwert, falls Spalte nicht vorhanden
-    
-    return continuous_df
-
-# Funktionen für Indikatoren (unverändert)
 def fetch_data(symbol, timeframe="1d", period="1y"):
     try:
         stock = yf.Ticker(symbol)
@@ -125,8 +115,7 @@ def calculate_rsi(data, period=14):
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
     rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+    return 100 - (100 / (1 + rs))
 
 def calculate_bollinger_bands(data, period=20):
     data = data.copy()
@@ -214,14 +203,12 @@ def generate_signals(data, current_price, sentiment=0):
     profit_take = None
     confidence_score = 0
 
-    # Einfluss des Sentiments auf die Signale
-    sentiment_factor = max(-1, min(1, sentiment))  # Begrenze auf -1 bis 1
+    sentiment_factor = max(-1, min(1, sentiment))
     long_signals = 0
     short_signals = 0
 
-    # Long-Signale mit Sentiment-Anpassung
     if current_rsi < 45 and current_price < lower_band:
-        long_signals += 1 + (sentiment_factor * 0.5)  # Positives Sentiment verstärkt Long-Signale
+        long_signals += 1 + (sentiment_factor * 0.5)
     if current_k < 45 and current_d < 45:
         long_signals += 1 + (sentiment_factor * 0.5)
     if current_price < ema50 and current_price < current_vwap:
@@ -231,9 +218,8 @@ def generate_signals(data, current_price, sentiment=0):
     if current_macd > current_signal and macd.iloc[-2] <= signal_line.iloc[-2]:
         long_signals += 1 + (sentiment_factor * 0.5)
 
-    # Short-Signale mit Sentiment-Anpassung
     if current_rsi > 55 and current_price > upper_band:
-        short_signals += 1 - (sentiment_factor * 0.5)  # Negatives Sentiment verstärkt Short-Signale
+        short_signals += 1 - (sentiment_factor * 0.5)
     if current_k > 55 and current_d > 55:
         short_signals += 1 - (sentiment_factor * 0.5)
     if current_price > ema50 and current_price > current_vwap:
@@ -243,12 +229,10 @@ def generate_signals(data, current_price, sentiment=0):
     if current_macd < current_signal and macd.iloc[-2] >= signal_line.iloc[-2]:
         short_signals += 1 - (sentiment_factor * 0.5)
 
-    # Entscheidung basierend auf angepassten Signalen
-    base_confidence = 20  # Basiskonfidenz pro Signal
+    base_confidence = 20
     if long_signals >= 3:
         base_score = long_signals * base_confidence
-        # Anpassung der Confidence basierend auf Sentiment
-        confidence_adjustment = sentiment_factor * 15  # Max. 15% Anpassung (positives Sentiment erhöht, negatives senkt)
+        confidence_adjustment = sentiment_factor * 15
         confidence_score = min(100, max(0, base_score + confidence_adjustment))
         entry_range_buy = f"{max(current_price * 0.98, lower_band * 0.98):.2f}–{lower_band:.2f}"
         exit_range_sell = f"{ema50 * 1.10:.2f}–{upper_band * 1.05:.2f}"
@@ -261,8 +245,7 @@ def generate_signals(data, current_price, sentiment=0):
                          f"Stop-Loss: {stop_loss:.2f}, Profit-Take: {profit_take:.2f}, Konfidenz: {confidence_score}%")
     elif short_signals >= 3:
         base_score = short_signals * base_confidence
-        # Anpassung der Confidence basierend auf Sentiment (negatives Sentiment erhöht, positives senkt)
-        confidence_adjustment = -sentiment_factor * 15  # Max. 15% Anpassung (negatives Sentiment erhöht, positives senkt)
+        confidence_adjustment = -sentiment_factor * 15
         confidence_score = min(100, max(0, base_score + confidence_adjustment))
         entry_range_buy = f"{upper_band:.2f}–{min(current_price * 1.02, upper_band * 1.02):.2f}"
         exit_range_sell = f"{ema50 * 0.90:.2f}–{lower_band * 0.95:.2f}"
@@ -280,152 +263,98 @@ def generate_signals(data, current_price, sentiment=0):
 
     return recommendation, signal_type, entry_range_buy, exit_range_sell, price_increase_forecast, confidence_score, stop_loss, profit_take
 
-def backtest_signals(data, ticker, sentiment=0):
-    signals = []
-    for i in range(20, len(data)):
-        temp_data = data.iloc[:i]
-        current_price = temp_data['Close'].iloc[-1]
-        rec, _, _, _, _, _, stop_loss, profit_take = generate_signals(temp_data, current_price, sentiment)
-        if "Kaufsignal" in rec:
-            signals.append(('Buy', i, current_price, stop_loss, profit_take))
-        elif "Verkaufssignal" in rec:
-            signals.append(('Sell', i, current_price, stop_loss, profit_take))
-    
+def backtest_signals(data, ticker, sentiment=0, period="1y"):
+    elliot_data = fetch_data(ticker, timeframe="1d", period=period)
+    if not elliot_data.empty and len(elliot_data) > 50:
+        elliot_data.loc[elliot_data.index[-1], 'Close'] = data['Close'].iloc[-1]
+        signals_elliot = generate_signals_elliot(elliot_data, sentiment)
+    else:
+        signals_elliot = ["Hold"] * len(data)
+
+    min_length = min(len(data), len(signals_elliot))
+    data = data.iloc[:min_length]
+    signals_elliot = signals_elliot[:min_length]
+
     long_returns = 0
     short_returns = 0
     long_trades = 0
     short_trades = 0
     trade_details = []
-    
-    for i, (signal_type, idx, price, sl, pt) in enumerate(signals):
-        if signal_type == 'Buy':
-            exit_price = None
-            max_holding_days = 30
-            for j in range(i + 1, min(i + max_holding_days + 1, len(signals))):
-                if signals[j][0] == 'Sell':
-                    exit_price = signals[j][2]
-                    break
-            if exit_price is None:
-                future_closes = data['Close'].iloc[idx + 1:idx + max_holding_days + 1].dropna()
-                if not future_closes.empty:
-                    max_price = future_closes.max()
-                    exit_price = min(max(max_price, sl) if sl else max_price, pt) if pt else max_price
-                    if exit_price > price and sl:
-                        exit_price = min(exit_price, sl)
-            if exit_price is not None and exit_price > price:
-                trade_return = ((exit_price - price) / price) * 100
-                long_returns += trade_return
-                long_trades += 1
-                trade_details.append(f"Long-Trade: Einstieg {price:.2f}, Ausstieg {exit_price:.2f}, Rendite {trade_return:.2f}%")
-        elif signal_type == 'Sell':
-            exit_price = None
-            max_holding_days = 30
-            for j in range(i + 1, min(i + max_holding_days + 1, len(signals))):
-                if signals[j][0] == 'Buy':
-                    exit_price = signals[j][2]
-                    break
-            if exit_price is None:
-                future_closes = data['Close'].iloc[idx + 1:idx + max_holding_days + 1].dropna()
-                if not future_closes.empty:
-                    min_price = future_closes.min()
-                    exit_price = max(min(min_price, sl) if sl else min_price, pt) if pt else min_price
-                    if exit_price < price and sl:
-                        exit_price = max(exit_price, sl)
-            if exit_price is not None and exit_price < price:
-                trade_return = ((price - exit_price) / price) * 100
-                short_returns += trade_return
-                short_trades += 1
-                trade_details.append(f"Short-Trade: Einstieg {price:.2f}, Ausstieg {exit_price:.2f}, Rendite {trade_return:.2f}%")
-    
+
+    for i in range(20, min_length - 10):
+        temp_data = data.iloc[:i]
+        current_price = temp_data['Close'].iloc[-1]
+        rec_standard, signal_type, _, _, _, _, _, _ = generate_signals(temp_data, current_price, sentiment)
+        signal_elliot = signals_elliot[i]
+
+        if "Kaufsignal" in rec_standard or signal_elliot == "Buy":
+            exit_price = data['Close'].iloc[i + 10] if i + 10 < len(data) else data['Close'].iloc[-1]
+            trade_return = ((exit_price - current_price) / current_price) * 100
+            long_returns += trade_return
+            long_trades += 1
+            trade_details.append(f"Long-Trade: Einstieg {current_price:.2f}, Ausstieg {exit_price:.2f}, Rendite {trade_return:.2f}%")
+        elif "Verkaufssignal" in rec_standard or signal_elliot == "Sell":
+            exit_price = data['Close'].iloc[i + 10] if i + 10 < len(data) else data['Close'].iloc[-1]
+            trade_return = ((current_price - exit_price) / current_price) * 100
+            short_returns += trade_return
+            short_trades += 1
+            trade_details.append(f"Short-Trade: Einstieg {current_price:.2f}, Ausstieg {exit_price:.2f}, Rendite {trade_return:.2f}%")
+
     total_returns = long_returns + short_returns
     total_trades = long_trades + short_trades
     
     if trade_details:
-        with st.expander("Trade-Details"):
+        with st.expander("Trade-Details", expanded=False) as expander:
+            st.markdown('<div class="card-3d"><div class="text-3d">', unsafe_allow_html=True)
             for detail in trade_details:
                 st.write(detail)
+            st.markdown('</div></div>', unsafe_allow_html=True)
     
-    return (f"Backtest-Rendite für {ticker} (Summen-Rendite, realistisch simuliert): "
-            f"Long: {long_returns:.2f}% über {long_trades} Signale, "
-            f"Short: {short_returns:.2f}% über {short_trades} Signale, "
-            f"Gesamt: {total_returns:.2f}% über {total_trades} Signale") if total_trades > 0 else f"Backtest-Rendite für {ticker}: 0.00% über {len(signals)} Signale"
+    return (f"Backtest-Rendite für {ticker} (Elliot & Standard kombiniert): "
+            f"Long: {long_returns:.2f}% über {long_trades} Trades, "
+            f"Short: {short_returns:.2f}% über {short_trades} Trades, "
+            f"Gesamt: {total_returns:.2f}% über {total_trades} Trades") if total_trades > 0 else f"Backtest-Rendite für {ticker}: 0.00% über 0 Trades"
 
 def calculate_correlation(data, ticker):
     sp500 = yf.Ticker("^GSPC").history(start=data.index[0], end=data.index[-1])['Close']
     correlation = data['Close'].corr(sp500)
-    volatility = data['Close'].pct_change().std() * np.sqrt(252) * 100
-    return f"Korrelation mit S&P 500: {correlation:.2f}, Annualisierte Volatilität: {volatility:.2f}%"
+    return f"Korrelation mit S&P 500: {correlation:.2f}"
 
-def plot_indicator_heatmap(data):
-    indicators = pd.DataFrame({
-        'RSI': (calculate_rsi(data) < 45).astype(int) * 2 + (calculate_rsi(data) > 55).astype(int) * -1,
-        'Bollinger': (data['Close'] < data['Lower']).astype(int) * 2 + (data['Close'] > data['Upper']).astype(int) * -1,
-        'Stochastic': (calculate_stochastic(data)[0] < 45).astype(int) * 2 + (calculate_stochastic(data)[0] > 55).astype(int) * -1,
-        'VWAP': (data['Close'] < data['VWAP']).astype(int) * 2 + (data['Close'] > data['VWAP']).astype(int) * -1,
-        'OBV': (calculate_obv(data).diff() > 0).astype(int) * 2 + (calculate_obv(data).diff() < 0).astype(int) * -1,
-        'MACD': (calculate_macd(data)[0] < calculate_macd(data)[1]).astype(int) * 2 + (calculate_macd(data)[0] > calculate_macd(data)[1]).astype(int) * -1,
-        'EMA50': (data['Close'] < data['EMA50']).astype(int) * 2 + (data['Close'] > data['EMA50']).astype(int) * -1
-    })
-    fig, ax = plt.subplots(figsize=(12, 10))
-    sns.heatmap(indicators.corr(), annot=True, cmap='coolwarm', center=0, fmt='.2f', ax=ax)
-    plt.title("**Optimierte Indikator-Korrelations-Heatmap**", fontweight='bold', fontsize=16)
-    return fig
-
-# --- Elliot-Wellen-Funktionen ---
 def generate_chart_image(df):
-    if df.empty:
-        return None  # Rückgabe None, wenn DataFrame leer ist
+    if df.empty: return None
     plt.figure(figsize=(10, 5))
-    plt.plot(df.index, df["Close"], label="Close", color='blue')
+    plt.plot(df.index, df["Close"], label="Close", color='green')
     plt.legend()
     buf = io.BytesIO()
-    plt.savefig(buf, format="png", facecolor='#1a1a1a', edgecolor='none')  # Dunkelgrauer Hintergrund
+    plt.savefig(buf, format="png", facecolor=colors['background'], edgecolor='none')
     buf.seek(0)
     img = Image.open(buf)
     plt.close()
     return img
 
 def detect_waves_in_image(img):
-    if img is None or isinstance(img, np.ndarray) and (img.size == 0 or img.shape[0] == 1):
-        return np.array([], dtype=int)
-    # Konvertiere das Bild in ein Array, falls es ein PIL-Bild ist
+    if img is None or isinstance(img, np.ndarray) and (img.size == 0 or img.shape[0] == 1): return np.array([], dtype=int)
     if isinstance(img, Image.Image):
-        img_array = np.array(img.convert('L'))  # Graustufenkonvertierung
+        img_array = np.array(img.convert('L'))
     else:
         img_array = np.array(img)
-    # Führe eine einfache Peaks-Erkennung durch (ähnlich wie mit Canny-Edges, aber ohne cv2)
     edges = np.gradient(np.mean(img_array, axis=0))
     peaks = argrelextrema(edges, np.greater, order=10)[0]
     return peaks
 
 def identify_elliot_waves(df, sentiment=0):
-    if df.empty:
-        return [], 0.5, []
-    
+    if df.empty: return [], 0.5, []
     highs = argrelextrema(df["High"].values, np.greater, order=5)[0]
     lows = argrelextrema(df["Low"].values, np.less, order=5)[0]
-    
     waves = []
     for i in range(min(len(highs), len(lows)) - 4):
-        wave_pattern = {
-            "W1": df["Close"].iloc[lows[i]],
-            "W2": df["Close"].iloc[highs[i]],
-            "W3": df["Close"].iloc[lows[i+1]],
-            "W4": df["Close"].iloc[highs[i+1]],
-            "W5": df["Close"].iloc[lows[i+2]]
-        }
+        wave_pattern = {"W1": df["Close"].iloc[lows[i]], "W2": df["Close"].iloc[highs[i]], "W3": df["Close"].iloc[lows[i+1]],
+                        "W4": df["Close"].iloc[highs[i+1]], "W5": df["Close"].iloc[lows[i+2]]}
         waves.append(wave_pattern)
     
-    features = pd.DataFrame({
-        "rsi": calculate_rsi(df),
-        "macd": calculate_macd(df)[0],
-        "volatility": df["Close"].pct_change().rolling(14).std(),
-        "sentiment": sentiment  # Füge Sentiment als Feature hinzu
-    }).dropna()
-    
+    features = pd.DataFrame({"rsi": calculate_rsi(df), "macd": calculate_macd(df)[0], "volatility": df["Close"].pct_change().rolling(14).std(), "sentiment": sentiment}).dropna()
     valid_indices = features.index[features.index <= df.index[-1]] if not df.index.empty else features.index[:1] if not features.empty else pd.Index([0])
-    if len(valid_indices) == 0 and not features.empty:
-        valid_indices = features.index[:1]
+    if len(valid_indices) == 0 and not features.empty: valid_indices = features.index[:1]
     
     shifted_close = df["Close"].shift(-5).dropna()
     current_close = df["Close"].dropna()
@@ -442,133 +371,66 @@ def identify_elliot_waves(df, sentiment=0):
         rf = RandomForestClassifier(n_estimators=100, max_depth=10)
         rf.fit(features, labels)
         wave_confidence = rf.predict_proba(features)[-1][1] if len(features) > 0 else 0.5
-        # Anpassung des Vertrauens basierend auf Sentiment
-        if sentiment > 0:
-            wave_confidence = min(1.0, wave_confidence + (sentiment * 0.2))  # Positives Sentiment erhöht Vertrauen
-        elif sentiment < 0:
-            wave_confidence = max(0.0, wave_confidence + (sentiment * 0.2))  # Negatives Sentiment senkt Vertrauen
+        if sentiment > 0: wave_confidence = min(1.0, wave_confidence + (sentiment * 0.2))
+        elif sentiment < 0: wave_confidence = max(0.0, wave_confidence + (sentiment * 0.2))
     else:
         wave_confidence = 0.5
     
     chart_img = generate_chart_image(df)
     waves_ki = detect_waves_in_image(chart_img)
-    
     return waves, wave_confidence, waves_ki
 
 def get_sentiment(symbol, manual_sentiment=None):
-    if manual_sentiment is not None:
-        return manual_sentiment  # Verwende den manuellen Sentiment-Wert, wenn angegeben
-    news = [
-        f"{symbol} reports strong earnings this quarter.",
-        f"Analysts predict a bullish trend for {symbol}.",
-        f"Market uncertainty affects {symbol} negatively."
-    ]
-    sentiment = np.mean([TextBlob(text).sentiment.polarity for text in news])
-    return sentiment
+    if manual_sentiment is not None: return manual_sentiment
+    news = [f"{symbol} reports strong earnings this quarter.", f"Analysts predict a bullish trend for {symbol}.", f"Market uncertainty affects {symbol} negatively."]
+    return np.mean([TextBlob(text).sentiment.polarity for text in news])
 
 def calculate_sma(df, period=50):
-    if df.empty:
-        return pd.Series([], dtype=float)
+    if df.empty: return pd.Series([], dtype=float)
     return df["Close"].rolling(window=period).mean()
 
 def calculate_fibonacci_levels(df):
-    if df.empty:
-        return [], []
+    if df.empty: return [], []
     high = df["High"].max()
     low = df["Low"].min()
-    levels = [high - (high - low) * level for level in [0, 0.236, 0.382, 0.5, 0.618, 1]]
-    zones = [
-        {"start": levels[4], "end": levels[3], "type": "Buy"},
-        {"start": levels[1], "end": levels[0], "type": "Sell"}
-    ]
+    levels = [high - (high - low) * level for level in [0, 0.236, 0.382, 0.5, 0.618, 1, 1.618]]
+    zones = [{"start": levels[4], "end": levels[3], "type": "Buy"}, {"start": levels[1], "end": levels[0], "type": "Sell"}]
     return levels, zones
 
 def generate_signals_elliot(df, sentiment=0):
-    if df.empty:
-        return []
+    if df.empty: return []
     sma = calculate_sma(df)
     rsi = calculate_rsi(df)
     signals = []
     for i in range(len(df)):
         signal = "Hold"
-        # Einfluss des Sentiments auf die Signale
-        sentiment_factor = max(-1, min(1, sentiment))  # Begrenze auf -1 bis 1
-        if df["Close"].iloc[i] > sma.iloc[i] and rsi.iloc[i] > 70 + (sentiment_factor * 10):  # Anpassung der RSI-Schwelle
+        sentiment_factor = max(-1, min(1, sentiment))
+        if df["Close"].iloc[i] > sma.iloc[i] and rsi.iloc[i] > 70 + (sentiment_factor * 10):
             signal = "Sell"
-        elif df["Close"].iloc[i] < sma.iloc[i] and rsi.iloc[i] < 30 - (sentiment_factor * 10):  # Anpassung der RSI-Schwelle
+        elif df["Close"].iloc[i] < sma.iloc[i] and rsi.iloc[i] < 30 - (sentiment_factor * 10):
             signal = "Buy"
         signals.append(signal)
     return signals
 
 def robustness_check(df, waves):
-    if df.empty or len(waves) == 0:
-        return False
+    if df.empty or len(waves) == 0: return False
     z_scores = np.abs((df["Close"] - df["Close"].mean()) / df["Close"].std())
     return not (z_scores > 3).any()
 
-def analyze_wave_details(df, waves, signals_elliot, price_increase_forecast, is_short_term=False, sentiment=0):
-    if not waves or not signals_elliot or df.empty or not price_increase_forecast:
-        return None
-    
-    # Finde das letzte Verkauf-/Kaufsignal
-    latest_signal_idx = -1
-    for i in range(len(signals_elliot) - 1, -1, -1):
-        if signals_elliot[i] in ["Buy", "Sell"]:
-            latest_signal_idx = i
-            break
-    
-    if latest_signal_idx == -1:
-        return None
-    
-    latest_signal = signals_elliot[latest_signal_idx]
-    
-    # Signaldatum mit unterschiedlichem Format je nach Short-Term/Long-Term
-    if is_short_term:
-        signal_date = df.index[latest_signal_idx].strftime("%Y-%m-%d %H:%M:%S")
-    else:
-        signal_date = df.index[latest_signal_idx].strftime("%Y-%m-%d")
-    
-    # Erwartete Zeit bis das Signal "losgeht" (nächster Handelstag)
-    signal_start = (df.index[latest_signal_idx] + timedelta(days=1)).replace(hour=9, minute=30, second=0).strftime("%Y-%m-%d %H:%M:%S")
-    if not df.index[-1].time() < datetime.strptime("16:00", "%H:%M").time():  # Wenn Markt offen ist, am nächsten Tag starten
-        signal_start = (df.index[latest_signal_idx] + timedelta(days=1)).replace(hour=9, minute=30, second=0).strftime("%Y-%m-%d %H:%M:%S")
-    
-    # Historische Wellen analysieren für Dauer
-    wave_durations = []
-    for wave in waves:
-        wave_values = list(wave.values())
-        wave_start = df.index[df["Close"] == wave_values[0]][0] if not df[df["Close"] == wave_values[0]].empty else df.index[0]
-        wave_end = df.index[df["Close"] == wave_values[-1]][0] if not df[df["Close"] == wave_values[-1]].empty else df.index[-1]
-        duration = (wave_end - wave_start).total_seconds() / 60 if is_short_term else (wave_end - wave_start).days  # Umrechnung in Minuten für Short-Term (1m), Tage für Long-Term
-        if duration > 0:
-            wave_durations.append(duration)
-    
-    avg_wave_duration = int(np.mean(wave_durations)) if wave_durations else (390 if is_short_term else 30)  # Fallback: 390 Minuten (6.5 Stunden * 60 Minuten für Handelszeiten 9:30–16:00) für Short-Term, 30 Tage für Long-Term
-    duration_unit = "Minuten" if is_short_term else "Tage"
-    
-    expected_return = price_increase_forecast if latest_signal == "Buy" else f"-{price_increase_forecast}"
-    
-    # Anpassung des erwarteten Returns basierend auf Sentiment
-    if sentiment > 0 and latest_signal == "Buy":
-        expected_return = f"{float(expected_return.strip('%')) * (1 + sentiment * 0.1):.1f}%"
-    elif sentiment < 0 and latest_signal == "Sell":
-        expected_return = f"{float(expected_return.strip('%')) * (1 + abs(sentiment) * 0.1):.1f}%"
-    
-    return {
-        "signal_type": latest_signal,
-        "signal_date": signal_date,
-        "signal_start": signal_start,
-        "expected_return": expected_return,
-        "duration_to_target": avg_wave_duration,
-        "duration_unit": duration_unit
-    }
-
-def analyze_stock(ticker, years=5, show_standard=False, show_longterm=False, show_longterm_signals=False, show_longterm_stats=False, show_shortterm=False, show_shortterm_signals=False, show_shortterm_stats=False, manual_sentiment=None):
-    current_price, price_display = get_live_price(ticker)
-    if current_price is None:
-        st.error(price_display)
+def analyze_stock(ticker, years=5, show_standard=True, show_longterm=True, show_longterm_signals=True, show_longterm_stats=True, manual_sentiment=None):
+    stock_info = get_stock_info(ticker)
+    if stock_info is None or isinstance(stock_info, str):
+        st.error(stock_info[1] if isinstance(stock_info, tuple) else "Keine Daten verfügbar")
         return
     
+    current_price = stock_info["current_price"]
+    price_display = stock_info["price_display"]
+    day_range = stock_info["day_range"]
+    avg_volume = stock_info["avg_volume"]
+    market_cap = stock_info["market_cap"]
+    pe_ratio = stock_info["pe_ratio"]
+    beta = stock_info["beta"]
+
     end_date = datetime.now()
     start_date = end_date - timedelta(days=years * 365)
     stock = yf.Ticker(ticker)
@@ -579,7 +441,6 @@ def analyze_stock(ticker, years=5, show_standard=False, show_longterm=False, sho
         st.error(f"Unzureichende Daten für {ticker}. Mindestens 50 Datenpunkte erforderlich.")
         return
     
-    # Aktualisiere Daten mit Live-Preis
     if not data.empty:
         data.loc[data.index[-1], 'Close'] = current_price
         data.loc[data.index[-1], 'Open'] = current_price
@@ -597,9 +458,8 @@ def analyze_stock(ticker, years=5, show_standard=False, show_longterm=False, sho
     
     sentiment = get_sentiment(ticker, manual_sentiment)
     recommendation, signal_type, entry_range_buy, exit_range_sell, price_increase_forecast, confidence_score, stop_loss, profit_take = generate_signals(data, current_price, sentiment)
-    backtest_result = backtest_signals(data, ticker, sentiment)
+    backtest_result = backtest_signals(data, ticker, sentiment, period=f"{years}y")
     
-    # Elliot-Wellen-Daten (Longterm: 1d, 1y)
     elliot_df_longterm = fetch_data(ticker, timeframe="1d", period="1y")
     if not elliot_df_longterm.empty:
         elliot_df_longterm.loc[elliot_df_longterm.index[-1], 'Close'] = current_price
@@ -611,145 +471,106 @@ def analyze_stock(ticker, years=5, show_standard=False, show_longterm=False, sho
     fib_levels_longterm, fib_zones_longterm = calculate_fibonacci_levels(elliot_df_longterm)
     signals_elliot_longterm = generate_signals_elliot(elliot_df_longterm, sentiment)
     robust_longterm = robustness_check(elliot_df_longterm, waves_longterm)
-    wave_details_longterm = analyze_wave_details(elliot_df_longterm, waves_longterm, signals_elliot_longterm, price_increase_forecast, is_short_term=False, sentiment=sentiment)
-    
-    # Elliot-Wellen-Daten (Shortterm: 1m, 1d für aktuellen Tag und Handelszeiten, nur reguläre Handelszeiten)
-    elliot_df_shortterm = fetch_data(ticker, timeframe="1m", period="1d")
-    if not elliot_df_shortterm.empty:
-        # Erstelle einen kontinuierlichen Datensatz für 1-Minuten-Intervalle, nur für den aktuellen Tag und Handelszeiten
-        elliot_df_shortterm = create_continuous_1m_data(elliot_df_shortterm, period_days=1)
-        # Bereinige Daten auf reguläre Handelszeiten (9:30–16:00 EST), nur aktueller Tag
-        elliot_df_shortterm = clean_trading_data(elliot_df_shortterm)
-        # Prüfe, ob die Spalten vorhanden sind, und füge Default-Werte hinzu, falls nicht
-        required_columns = ["Open", "High", "Low", "Close"]
-        for col in required_columns:
-            if col not in elliot_df_shortterm.columns:
-                elliot_df_shortterm[col] = elliot_df_shortterm["Close"].fillna(0)
-        
-        # Aktualisiere Daten mit Live-Preis (nur reguläre Handelszeiten)
-        if not elliot_df_shortterm.empty and len(elliot_df_shortterm) > 0:
-            elliot_df_shortterm.loc[elliot_df_shortterm.index[-1], 'Close'] = current_price
-            elliot_df_shortterm.loc[elliot_df_shortterm.index[-1], 'Open'] = current_price
-            elliot_df_shortterm.loc[elliot_df_shortterm.index[-1], 'High'] = current_price
-            elliot_df_shortterm.loc[elliot_df_shortterm.index[-1], 'Low'] = current_price
-        
-        waves_shortterm, wave_confidence_shortterm, waves_ki_shortterm = identify_elliot_waves(elliot_df_shortterm, sentiment) if not elliot_df_shortterm.empty else ([], 0.5, [])
-        sma_elliot_shortterm = calculate_sma(elliot_df_shortterm)
-        fib_levels_shortterm, fib_zones_shortterm = calculate_fibonacci_levels(elliot_df_shortterm)
-        signals_elliot_shortterm = generate_signals_elliot(elliot_df_shortterm, sentiment)
-        robust_shortterm = robustness_check(elliot_df_shortterm, waves_shortterm)
     
     col1, col2 = st.columns([1, 2])
-    
     with col1:
-        st.header("Marktdaten")
-        st.write(f"**Aktueller Preis**: {price_display}")
-        st.write(f"**RSI**: {rsi.iloc[-1]:.2f}")
-        st.write(f"**Bollinger Bands** - Oberes Band: {data['Upper'].iloc[-1]:.2f}, Unteres Band: {data['Lower'].iloc[-1]:.2f}")
-        st.write(f"**Stochastic %K**: {k.iloc[-1]:.2f}, %D: {d.iloc[-1]:.2f}")
-        st.write(f"**EMA50**: {data['EMA50'].iloc[-1]:.2f}")
-        st.write(f"**VWAP**: {data['VWAP'].iloc[-1]:.2f}")
-        st.write(f"**OBV**: {data['OBV'].iloc[-1]:.2f}")
-        st.write(f"**ATR (Volatilität)**: {data['ATR'].iloc[-1]:.2f}")
-        st.write(f"**MACD**: {macd.iloc[-1]:.2f}, Signal Line: {signal_line.iloc[-1]:.2f}")
+        st.markdown(f'<div class="card-3d"><h2 class="header-3d">Marktdaten</h2>'
+                    f'<div class="text-3d"><p><b>Aktueller Preis:</b> {price_display}</p>'
+                    f'<p><b>Tagesbereich:</b> {day_range}</p>'
+                    f'<p><b>Durchschnittliches Volumen:</b> {avg_volume}</p>'
+                    f'<p><b>Marktkapitalisierung:</b> {market_cap}</p>'
+                    f'<p><b>Kurs-Gewinn-Verhältnis (KGV):</b> {pe_ratio}</p>'
+                    f'<p><b>Beta (Marktrisiko):</b> {beta} (<1 stabil, >1 volatil)</p></div></div>', unsafe_allow_html=True)
     
     with col2:
-        st.header("Handelsempfehlung")
-        st.write(f"**Empfehlung**: {recommendation}")
-        if entry_range_buy:
-            st.write(f"**Einstiegsbereich**: {entry_range_buy}")
-        if exit_range_sell:
-            st.write(f"**Verkaufsbereich (oder Rückkauf bei Short)**: {exit_range_sell}")
-        if price_increase_forecast:
-            st.write(f"**Prognostizierter Kursanstieg/Rückgang**: {price_increase_forecast}")
-        if stop_loss:
-            st.write(f"**Stop-Loss (Risikomanagement)**: {stop_loss:.2f}")
-        if profit_take:
-            st.write(f"**Profit-Take (Ziel)**: {profit_take:.2f}")
-        st.write(f"**Konfidenz des Signals**: {confidence_score}%")
+        st.markdown(f'<div class="card-3d"><h2 class="header-3d">Handelsempfehlung</h2>', unsafe_allow_html=True)
+        if signal_type:
+            stop_loss_display = f"{stop_loss:.2f}" if stop_loss is not None else "N/A"
+            profit_take_display = f"{profit_take:.2f}" if profit_take is not None else "N/A"
+            st.markdown(f'<div class="text-3d"><p><b>Empfehlung:</b> {recommendation}</p>'
+                        f'<p><b>Einstiegsbereich:</b> {entry_range_buy if entry_range_buy else "N/A"}</p>'
+                        f'<p><b>Verkaufsbereich (oder Rückkauf bei Short):</b> {exit_range_sell if exit_range_sell else "N/A"}</p>'
+                        f'<p><b>Prognostizierter Kursanstieg/Rückgang:</b> {price_increase_forecast if price_increase_forecast else "N/A"}</p>'
+                        f'<p><b>Stop-Loss (Risikomanagement):</b> {stop_loss_display}</p>'
+                        f'<p><b>Profit-Take (Ziel):</b> {profit_take_display}</p>'
+                        f'<p><b>Konfidenz des Signals:</b> {confidence_score}%</p></div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="text-3d"><p><b>Keine klare Handelsempfehlung vorhanden.</b></p>'
+                        f'<p><b>Aktueller RSI:</b> {rsi.iloc[-1]:.2f}</p>'
+                        f'<p><b>Bollinger Bands</b> - Oberes Band: {data["Upper"].iloc[-1]:.2f}, Unteres Band: {data["Lower"].iloc[-1]:.2f}</p>'
+                        f'<p><b>Stochastic %K:</b> {k.iloc[-1]:.2f}, %D: {d.iloc[-1]:.2f}</p>'
+                        f'<p><b>EMA50:</b> {data["EMA50"].iloc[-1]:.2f}</p>'
+                        f'<p><b>VWAP:</b> {data["VWAP"].iloc[-1]:.2f}</p></div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
     
-    st.header("Zusammenfassung und Risikoanalyse")
-    st.write(f"{calculate_correlation(data, ticker)}")
-    st.write(f"{backtest_result}")
+    st.markdown(f'<div class="card-3d"><h2 class="header-3d">Zusammenfassung und Risikoanalyse</h2>'
+                f'<div class="text-3d"><p>{calculate_correlation(data, ticker)}</p><p>{backtest_result}</p></div></div>', unsafe_allow_html=True)
     
     if show_standard:
-        st.header("Standarddiagramm")
-        fig, axes = plt.subplots(5, 1, figsize=(15, 20), facecolor='#1a1a1a')
+        st.markdown(f'<div class="card-3d"><h2 class="header-3d">Standardanalyse</h2></div>', unsafe_allow_html=True)
+        fig, axes = plt.subplots(4, 1, figsize=(15, 16), facecolor=colors['background'])
         plt.style.use('dark_background')
         
-        axes[0].plot(data.index, data['Close'], label='Kurs', color='blue', linewidth=1.5)
-        axes[0].plot(data.index, data['MA20'], label='MA20', color='orange', linewidth=1.5)
-        axes[0].plot(data.index, data['Upper'], label='Oberes Band', color='red', linestyle='--', linewidth=1)
-        axes[0].plot(data.index, data['Lower'], label='Unteres Band', color='green', linestyle='--', linewidth=1)
-        axes[0].plot(data.index, data['EMA50'], label='EMA50', color='cyan', linestyle='-.', linewidth=1.5)
-        axes[0].plot(data.index, data['VWAP'], label='VWAP', color='purple', linestyle='-.', linewidth=1.5)
+        axes[0].plot(data.index, data['Close'], label='Kurs', color=colors['positive'], linewidth=2.0, alpha=0.8)
+        axes[0].plot(data.index, data['MA20'], label='MA20', color=colors['neutral'], linewidth=2.0, alpha=0.8)
+        axes[0].plot(data.index, data['Upper'], label='Oberes Band', color=colors['negative'], linestyle='--', linewidth=1.5, alpha=0.7)
+        axes[0].plot(data.index, data['Lower'], label='Unteres Band', color=colors['positive'], linestyle='--', linewidth=1.5, alpha=0.7)
+        axes[0].plot(data.index, data['EMA50'], label='EMA50', color=colors['neutral'], linestyle='-.', linewidth=2.0, alpha=0.8)
+        axes[0].plot(data.index, data['VWAP'], label='VWAP', color=colors['header2'], linestyle='-.', linewidth=2.0, alpha=0.8)
         if signal_type == "Long":
-            axes[0].scatter(data.index[-1], current_price, color='green', marker='^', s=200, label='Kauf-Signal')
+            axes[0].scatter(data.index[-1], current_price, color=colors['positive'], marker='^', s=200, label='Kauf-Signal', edgecolor='white', linewidth=1)
         elif signal_type == "Short":
-            axes[0].scatter(data.index[-1], current_price, color='red', marker='v', s=200, label='Verkauf-Signal')
-        axes[0].set_title(f"**{ticker} - Optimierte Marktanalyse (Kurs & Indikatoren)**", fontweight='bold', fontsize=18, color='white')
-        axes[0].set_xlabel("Datum", fontweight='bold', fontsize=12, color='white')
-        axes[0].set_ylabel("Preis (USD)", fontweight='bold', fontsize=12, color='white')
-        axes[0].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor='#2c2c2c', edgecolor='white', labelcolor='white')
-        axes[0].grid(True, linestyle='--', alpha=0.3, color='gray')
-        axes[0].set_facecolor('#1a1a1a')
+            axes[0].scatter(data.index[-1], current_price, color=colors['negative'], marker='v', s=200, label='Verkauf-Signal', edgecolor='white', linewidth=1)
+        axes[0].set_title("Marktanalyse für " + ticker, fontweight='bold', fontsize=24, color=colors['header1'])
+        axes[0].set_xlabel("Datum", fontweight='bold', fontsize=14, color=colors['text'])
+        axes[0].set_ylabel("Preis (USD)", fontweight='bold', fontsize=14, color=colors['text'])
+        axes[0].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor=colors['card'], edgecolor='white', labelcolor=colors['text'], shadow=True)
+        axes[0].grid(True, linestyle='--', alpha=0.3, color='#4A4A4A')
+        axes[0].set_facecolor(colors['background'])
         
-        axes[1].plot(data.index, rsi, label='RSI', color='purple', linewidth=1.5)
-        axes[1].axhline(y=50, color='gray', linestyle='--', alpha=0.5, label='Neutral')
-        axes[1].axhline(y=30, color='green', linestyle='--', alpha=0.5, label='Überverkauft (Long)')
-        axes[1].axhline(y=70, color='red', linestyle='--', alpha=0.5, label='Überkauft (Short)')
-        axes[1].set_title(f"**Relative Strength Index (RSI)**", fontweight='bold', fontsize=16, color='white')
-        axes[1].set_xlabel("Datum", fontweight='bold', fontsize=12, color='white')
-        axes[1].set_ylabel("RSI-Wert", fontweight='bold', fontsize=12, color='white')
-        axes[1].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor='#2c2c2c', edgecolor='white', labelcolor='white')
-        axes[1].grid(True, linestyle='--', alpha=0.3, color='gray')
-        axes[1].set_facecolor('#1a1a1a')
+        axes[1].plot(data.index, rsi, label='RSI', color=colors['header2'], linewidth=2.0, alpha=0.8)
+        axes[1].axhline(y=50, color='#4A4A4A', linestyle='--', alpha=0.5, label='Neutral')
+        axes[1].axhline(y=30, color=colors['positive'], linestyle='--', alpha=0.7, label='Überverkauft (Long)')
+        axes[1].axhline(y=70, color=colors['negative'], linestyle='--', alpha=0.7, label='Überkauft (Short)')
+        axes[1].set_title("Relative Strength Index (RSI)", fontweight='bold', fontsize=20, color=colors['header2'])
+        axes[1].set_xlabel("Datum", fontweight='bold', fontsize=14, color=colors['text'])
+        axes[1].set_ylabel("RSI-Wert", fontweight='bold', fontsize=14, color=colors['text'])
+        axes[1].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor=colors['card'], edgecolor='white', labelcolor=colors['text'], shadow=True)
+        axes[1].grid(True, linestyle='--', alpha=0.3, color='#4A4A4A')
+        axes[1].set_facecolor(colors['background'])
         
-        axes[2].plot(data.index, k, label='%K', color='red', alpha=0.7, linewidth=1.5)
-        axes[2].plot(data.index, d, label='%D', color='green', alpha=0.7, linewidth=1.5)
-        axes[2].axhline(y=50, color='gray', linestyle='--', alpha=0.5, label='Neutral')
-        axes[2].axhline(y=30, color='green', linestyle='--', alpha=0.5, label='Überverkauft (Long)')
-        axes[2].axhline(y=70, color='red', linestyle='--', alpha=0.5, label='Überkauft (Short)')
-        axes[2].set_title(f"**Stochastic Oscillator**", fontweight='bold', fontsize=16, color='white')
-        axes[2].set_xlabel("Datum", fontweight='bold', fontsize=12, color='white')
-        axes[2].set_ylabel("Stochastic-Wert", fontweight='bold', fontsize=12, color='white')
-        axes[2].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor='#2c2c2c', edgecolor='white', labelcolor='white')
-        axes[2].grid(True, linestyle='--', alpha=0.3, color='gray')
-        axes[2].set_facecolor('#1a1a1a')
+        axes[2].plot(data.index, k, label='%K', color=colors['negative'], alpha=0.8, linewidth=2.0)
+        axes[2].plot(data.index, d, label='%D', color=colors['positive'], alpha=0.8, linewidth=2.0)
+        axes[2].axhline(y=50, color='#4A4A4A', linestyle='--', alpha=0.5, label='Neutral')
+        axes[2].axhline(y=30, color=colors['positive'], linestyle='--', alpha=0.7, label='Überverkauft (Long)')
+        axes[2].axhline(y=70, color=colors['negative'], linestyle='--', alpha=0.7, label='Überkauft (Short)')
+        axes[2].set_title("Stochastic Oscillator", fontweight='bold', fontsize=20, color=colors['header2'])
+        axes[2].set_xlabel("Datum", fontweight='bold', fontsize=14, color=colors['text'])
+        axes[2].set_ylabel("Stochastic-Wert", fontweight='bold', fontsize=14, color=colors['text'])
+        axes[2].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor=colors['card'], edgecolor='white', labelcolor=colors['text'], shadow=True)
+        axes[2].grid(True, linestyle='--', alpha=0.3, color='#4A4A4A')
+        axes[2].set_facecolor(colors['background'])
         
-        axes[3].plot(data.index, macd, label='MACD', color='blue', linewidth=1.5)
-        axes[3].plot(data.index, signal_line, label='Signal Line', color='orange', linewidth=1.5)
-        axes[3].bar(data.index, macd - signal_line, label='MACD Histogram', color='gray', alpha=0.5, width=0.8)
-        axes[3].axhline(y=0, color='gray', linestyle='-', alpha=0.3)
-        axes[3].set_title(f"**Moving Average Convergence Divergence (MACD)**", fontweight='bold', fontsize=16, color='white')
-        axes[3].set_xlabel("Datum", fontweight='bold', fontsize=12, color='white')
-        axes[3].set_ylabel("MACD-Wert", fontweight='bold', fontsize=12, color='white')
-        axes[3].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor='#2c2c2c', edgecolor='white', labelcolor='white')
-        axes[3].grid(True, linestyle='--', alpha=0.3, color='gray')
-        axes[3].set_facecolor('#1a1a1a')
-        
-        axes[4].plot(data.index, data['OBV'], label='OBV', color='purple', linewidth=1.5)
-        axes[4].plot(data.index, data['VWAP'], label='VWAP', color='blue', linestyle='-.', linewidth=1.5)
-        axes[4].set_title(f"**On-Balance Volume (OBV) & Volume Weighted Average Price (VWAP)**", fontweight='bold', fontsize=16, color='white')
-        axes[4].set_xlabel("Datum", fontweight='bold', fontsize=12, color='white')
-        axes[4].set_ylabel("Wert", fontweight='bold', fontsize=12, color='white')
-        axes[4].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor='#2c2c2c', edgecolor='white', labelcolor='white')
-        axes[4].grid(True, linestyle='--', alpha=0.3, color='gray')
-        axes[4].set_facecolor('#1a1a1a')
+        axes[3].plot(data.index, macd, label='MACD', color=colors['header2'], linewidth=2.0, alpha=0.8)
+        axes[3].plot(data.index, signal_line, label='Signal Line', color=colors['neutral'], linewidth=2.0, alpha=0.8)
+        axes[3].bar(data.index, macd - signal_line, label='MACD Histogram', color='#4A4A4A', alpha=0.5, width=0.8)
+        axes[3].axhline(y=0, color='#4A4A4A', linestyle='-', alpha=0.3)
+        axes[3].set_title("Moving Average Convergence Divergence (MACD)", fontweight='bold', fontsize=20, color=colors['header2'])
+        axes[3].set_xlabel("Datum", fontweight='bold', fontsize=14, color=colors['text'])
+        axes[3].set_ylabel("MACD-Wert", fontweight='bold', fontsize=14, color=colors['text'])
+        axes[3].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., facecolor=colors['card'], edgecolor='white', labelcolor=colors['text'], shadow=True)
+        axes[3].grid(True, linestyle='--', alpha=0.3, color='#4A4A4A')
+        axes[3].set_facecolor(colors['background'])
         
         plt.tight_layout()
         st.pyplot(fig)
-
-    if st.checkbox("Indikator-Korrelations-Heatmap anzeigen", key="heatmap_checkbox"):
-        heatmap_fig = plot_indicator_heatmap(data)
-        st.pyplot(heatmap_fig)
     
     if show_longterm:
-        st.header("Elliot Wave (Long-Term) Analyse")
+        st.markdown(f'<div class="card-3d"><h2 class="header-3d">Elliot-Wave-Analyse</h2></div>', unsafe_allow_html=True)
         if st.checkbox("Legende ein-/ausblenden", value=True, key="legend_toggle_longterm"):
             legend_html = f"""
-            <div style="background-color: {colors['card']}; padding: 10px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);">
-                <ul style="list-style-type: none; padding: 0; margin: 0; font-size: 12px; color: {colors['text']};">
+            <div class="card-3d" style="background-color: {colors['card']}; padding: 15px; border-radius: 15px; box-shadow: 0 10px 20px rgba(0, 0, 0, 0.5), 0 0 10px rgba(255, 215, 0, 0.2);">
+                <ul style="list-style-type: none; padding: 0; margin: 0; font-size: 14px; color: {colors['text']};">
                     <li><span style="color: {colors['positive']};">●</span> Buy Signal / Zone</li>
                     <li><span style="color: {colors['negative']};">●</span> Sell Signal / Zone</li>
                     <li><span style="color: {colors['neutral']};">●</span> SMA</li>
@@ -760,179 +581,240 @@ def analyze_stock(ticker, years=5, show_standard=False, show_longterm=False, sho
             st.markdown(legend_html, unsafe_allow_html=True)
         
         fig_elliot = go.Figure()
-        fig_elliot.add_trace(go.Candlestick(x=elliot_df_longterm.index, open=elliot_df_longterm["Open"], high=elliot_df_longterm["High"], low=elliot_df_longterm["Low"], close=elliot_df_longterm["Close"], name="Preis"))
+        fig_elliot.add_trace(go.Candlestick(x=elliot_df_longterm.index, open=elliot_df_longterm["Open"], high=elliot_df_longterm["High"], low=elliot_df_longterm["Low"], close=elliot_df_longterm["Close"], name="Preis",
+                                            increasing_line_color=colors['positive'], decreasing_line_color=colors['negative']))
         
         for i, wave in enumerate(waves_longterm):
             fig_elliot.add_trace(go.Scatter(x=[elliot_df_longterm.index[list(wave.values()).index(v)] for v in wave.values()], 
-                                           y=list(wave.values()), mode="lines+markers", name=f"Wave {i+1}", line=dict(color=colors['positive'])))
+                                            y=list(wave.values()), mode="lines+markers", name=f"Wave {i+1}", line=dict(color=colors['positive'], width=2),
+                                            marker=dict(size=8, color=colors['positive'], symbol='triangle-up', line=dict(width=1, color='white'))))
         
         for i in range(len(elliot_df_longterm)):
             if signals_elliot_longterm[i] == "Buy":
                 fig_elliot.add_trace(go.Scatter(x=[elliot_df_longterm.index[i]], y=[elliot_df_longterm["Close"].iloc[i]], mode="markers", 
-                                               marker=dict(symbol="triangle-up", size=12, color=colors['positive']), name="Buy Signal"))
+                                                marker=dict(symbol="triangle-up", size=12, color=colors['positive'], line=dict(width=1, color='white')), name="Buy Signal"))
             elif signals_elliot_longterm[i] == "Sell":
                 fig_elliot.add_trace(go.Scatter(x=[elliot_df_longterm.index[i]], y=[elliot_df_longterm["Close"].iloc[i]], mode="markers", 
-                                               marker=dict(symbol="triangle-down", size=12, color=colors['negative']), name="Sell Signal"))
+                                                marker=dict(symbol="triangle-down", size=12, color=colors['negative'], line=dict(width=1, color='white')), name="Sell Signal"))
         
         for zone in fib_zones_longterm:
             fig_elliot.add_trace(go.Scatter(x=[elliot_df_longterm.index[0], elliot_df_longterm.index[-1], elliot_df_longterm.index[-1], elliot_df_longterm.index[0], elliot_df_longterm.index[0]], 
-                                           y=[zone["start"], zone["start"], zone["end"], zone["end"], zone["start"]], 
-                                           fill="toself", fillcolor=colors['positive'] if zone["type"] == "Buy" else colors['negative'], 
-                                           opacity=0.2, line=dict(color="rgba(255,255,255,0)"), 
-                                           showlegend=False, name=f"{zone['type']} Zone"))
+                                            y=[zone["start"], zone["start"], zone["end"], zone["end"], zone["start"]], 
+                                            fill="toself", fillcolor=colors['positive'] if zone["type"] == "Buy" else colors['negative'], 
+                                            opacity=0.2, line=dict(color="rgba(255,255,255,0)"), showlegend=False, name=f"{zone['type']} Zone"))
         
-        fig_elliot.add_trace(go.Scatter(x=elliot_df_longterm.index, y=sma_elliot_longterm, name="SMA 50", line=dict(color=colors['neutral'])))
+        fig_elliot.add_trace(go.Scatter(x=elliot_df_longterm.index, y=sma_elliot_longterm, name="SMA 50", line=dict(color=colors['neutral'], width=2, dash='dashdot')))
         
-        fig_elliot.update_layout(
-            height=800,
-            showlegend=False,
-            title_text=f"Elliot Wave (Long-Term) Analyse für {ticker} (1 Jahr)",
-            plot_bgcolor=colors['background'],
-            paper_bgcolor=colors['background'],
-            font_color=colors['text'],
-            margin=dict(t=80, b=50, l=50, r=50)
-        )
+        fig_elliot.update_layout(height=900, showlegend=False, title_text=f"Elliot-Wave-Analyse für {ticker} (1 Jahr)",
+                                 plot_bgcolor=colors['background'], paper_bgcolor=colors['background'], font_color=colors['text'], 
+                                 title_font=dict(size=24, color=colors['header1'], family='Arial Black'),
+                                 margin=dict(t=100, b=50, l=50, r=50),
+                                 scene=dict(camera=dict(eye=dict(x=1.25, y=1.25, z=0.1))),
+                                 hovermode="x unified",
+                                 transition={'duration': 300, 'easing': 'cubic-in-out'})
+        
         st.plotly_chart(fig_elliot, use_container_width=True)
         
-        if wave_details_longterm:
-            st.subheader("Details zum aktuellen Elliot-Wellen-Signal (Long-Term)")
-            st.write(f"**Signal-Typ**: {wave_details_longterm['signal_type']}")
-            st.write(f"**Signaldatum**: {wave_details_longterm['signal_date']}")
-            st.write(f"**Geschätzte Dauer bis der prognostizierte Kursgewinn erreicht wird**: {wave_details_longterm['duration_to_target']} {wave_details_longterm['duration_unit']}")
-            st.write(f"**Erwarteter Kursgewinn bzw. Kursverlust in %**: {wave_details_longterm['expected_return']}")
+        st.markdown(f'<div class="card-3d"><h2 class="header-3d">Elliot-Wave-Signale & Zonen</h2>', unsafe_allow_html=True)
+        st.markdown(f'<div class="text-3d"><p><b>Aktuelles Signal:</b> {signals_elliot_longterm[-1] if signals_elliot_longterm else "Hold"}</p></div>', unsafe_allow_html=True)
         
-        if show_longterm_signals:
-            st.header("Elliot Wave (Long-Term) Signale & Zonen")
-            st.markdown(f'<div class="card">', unsafe_allow_html=True)
-            st.write(f"**Aktuelles Signal**: {signals_elliot_longterm[-1] if signals_elliot_longterm else 'Hold'}")
-            for zone in fib_zones_longterm:
-                zone_color = colors['positive'] if zone["type"] == "Buy" else colors['negative']
-                st.markdown(f'<span style="color: {zone_color}">**{zone["type"]} Zone:** {zone["start"]:.2f} - {zone["end"]:.2f}</span>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+        latest_signal_idx = -1
+        latest_signal_type = signals_elliot_longterm[-1] if signals_elliot_longterm else "Hold"
+        for i in range(len(signals_elliot_longterm)-1, -1, -1):
+            if signals_elliot_longterm[i] in ["Buy", "Sell"]:
+                latest_signal_idx = i
+                latest_signal_type = signals_elliot_longterm[i]
+                break
         
-        if show_longterm_stats:
-            st.header("Elliot Wave (Long-Term) Marktstatistiken")
-            st.markdown(f'<div class="card">', unsafe_allow_html=True)
-            st.write(f"**Wave Confidence:** {wave_confidence_longterm:.2%}")
-            sentiment_text = f"**Sentiment:** {sentiment:.2f} {'(Bullish)' if sentiment > 0 else '(Bearish)' if sentiment < 0 else '(Neutral)'}"
-            st.markdown(f'<span style="color: {colors["positive"] if sentiment > 0 else colors["negative"] if sentiment < 0 else colors["neutral"]}">{sentiment_text}</span>', unsafe_allow_html=True)
-            st.write(f"**Robust:** {'✅' if robust_longterm else '❌'}")
-            st.markdown('</div>', unsafe_allow_html=True)
+        if latest_signal_idx != -1 and latest_signal_type != "Hold":
+            signal_date = elliot_df_longterm.index[latest_signal_idx].strftime('%Y-%m-%d')
+            current_price = elliot_df_longterm["Close"].iloc[latest_signal_idx]
+            wave_count = len(waves_longterm)
+            current_wave = min(latest_signal_idx // (len(elliot_df_longterm) // wave_count) + 1, wave_count) if wave_count > 0 else 1
+            
+            forecast = 0.0
+            if waves_longterm and wave_count > 0:
+                latest_wave = waves_longterm[-1]
+                if latest_signal_type == "Buy":
+                    target_price = latest_wave.get("W5", latest_wave.get("W3", current_price))
+                    forecast = ((target_price - current_price) / current_price) * 100
+                elif latest_signal_type == "Sell":
+                    target_price = latest_wave.get("W4", latest_wave.get("W2", current_price))
+                    forecast = ((current_price - target_price) / current_price) * 100
+            
+            wave_duration = 0
+            if wave_count > 0:
+                wave_start_idx = latest_signal_idx - (len(elliot_df_longterm) // wave_count) * (current_wave - 1)
+                wave_end_idx = min(wave_start_idx + (len(elliot_df_longterm) // wave_count), len(elliot_df_longterm) - 1)
+                if wave_start_idx >= 0 and wave_end_idx < len(elliot_df_longterm):
+                    wave_duration = (elliot_df_longterm.index[wave_end_idx] - elliot_df_longterm.index[wave_start_idx]).days
+            
+            wave_amplitude = 0.0
+            if wave_count > 0 and wave_start_idx >= 0 and wave_end_idx < len(elliot_df_longterm):
+                wave_start_price = elliot_df_longterm["Close"].iloc[wave_start_idx]
+                wave_end_price = elliot_df_longterm["Close"].iloc[wave_end_idx]
+                wave_amplitude = ((wave_end_price - wave_start_price) / wave_start_price) * 100
+            
+            trend_direction = "Neutral"
+            if current_wave in [1, 3, 5]: trend_direction = "Bullish"
+            elif current_wave in [2, 4]: trend_direction = "Bearish"
+            
+            st.markdown(f'<div class="text-3d"><p><b>Details zum aktuellsten Signal:</b></p>'
+                        f'<p>- <b>Signaldatum:</b> {signal_date}</p>'
+                        f'<p>- <b>Prognostizierter Kurs{"anstieg" if latest_signal_type == "Buy" else "verlust"}:</b> {forecast:.1f}%</p>'
+                        f'<p>- <b>Wellenlänge:</b> {wave_duration} Tage</p>'
+                        f'<p>- <b>Wellenstärke:</b> {wave_amplitude:.1f}%</p>'
+                        f'<p>- <b>Trendrichtung:</b> {trend_direction}</p></div>', unsafe_allow_html=True)
+
+        for zone in fib_zones_longterm:
+            zone_color = colors['positive'] if zone["type"] == "Buy" else colors['negative']
+            st.markdown(f'<div class="text-3d"><span style="color: {zone_color}"><b>{zone["type"]} Zone:</b> {zone["start"]:.2f} - {zone["end"]:.2f}</span></div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown(f'<div class="card-3d"><h2 class="header-3d">Elliot-Wave-Marktstatistiken</h2>', unsafe_allow_html=True)
+        st.markdown(f'<div class="text-3d"><p><b>Wave Confidence:</b> {wave_confidence_longterm:.2%} (Sicherheit der Wellenstruktur)</p>'
+                    f'<p><b>Sentiment:</b> {sentiment:.2f} {"(Bullish)" if sentiment > 0 else "(Bearish)" if sentiment < 0 else "(Neutral)"}</p>'
+                    f'<p><b>Robust:</b> {"✅" if robust_longterm else "❌"} (Daten ohne extreme Ausreißer)</p></div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+def analyze_cluster_for_buy_signals(cluster_name, manual_sentiment=0):
+    st.markdown(f'<div class="card-3d"><h2 class="header-3d">Elliot-Wave Kaufsignale für {cluster_name}</h2></div>', unsafe_allow_html=True)
+    buy_signals = []
+    for stock in sorted(clusters[cluster_name]):
+        ticker = stock.split(" - ")[1]
+        stock_info = get_stock_info(ticker)
+        if isinstance(stock_info, dict):
+            current_price = stock_info["current_price"]
+            data = fetch_data(ticker, timeframe="1d", period="1y")
+            if not data.empty and len(data) >= 50:
+                data.loc[data.index[-1], 'Close'] = current_price
+                data.loc[data.index[-1], 'Open'] = current_price
+                data.loc[data.index[-1], 'High'] = current_price
+                data.loc[data.index[-1], 'Low'] = current_price
+                signals_elliot = generate_signals_elliot(data, manual_sentiment)
+                if signals_elliot[-1] == "Buy":
+                    buy_signals.append(ticker)
+        else:
+            st.warning(f"Keine Daten für {ticker} verfügbar.")
     
-    if show_shortterm:
-        st.header("Elliot Wave (Short-Term) Analyse")
-        if st.checkbox("Legende ein-/ausblenden", value=True, key="legend_toggle_shortterm"):
-            legend_html = f"""
-            <div style="background-color: {colors['card']}; padding: 10px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);">
-                <ul style="list-style-type: none; padding: 0; margin: 0; font-size: 12px; color: {colors['text']};">
-                    <li><span style="color: {colors['positive']};">●</span> Buy Signal / Zone</li>
-                    <li><span style="color: {colors['negative']};">●</span> Sell Signal / Zone</li>
-                    <li><span style="color: {colors['neutral']};">●</span> SMA</li>
-                    <li><span style="color: {colors['positive']};">-</span> Elliot Wave</li>
-                </ul>
-            </div>
-            """
-            st.markdown(legend_html, unsafe_allow_html=True)
-        
-        if not elliot_df_shortterm.empty:
-            fig_elliot = go.Figure()
-            fig_elliot.add_trace(go.Candlestick(x=elliot_df_shortterm.index, open=elliot_df_shortterm["Open"], high=elliot_df_shortterm["High"], low=elliot_df_shortterm["Low"], close=elliot_df_shortterm["Close"], name="Preis", increasing_line_color=colors['positive'], decreasing_line_color=colors['negative'], line_width=1, opacity=1))
-            
-            for i, wave in enumerate(waves_shortterm):
-                fig_elliot.add_trace(go.Scatter(x=[elliot_df_shortterm.index[list(wave.values()).index(v)] for v in wave.values()], 
-                                               y=list(wave.values()), mode="lines", name=f"Wave {i+1}", line=dict(color=colors['positive'], width=1.5)))
-            
-            for i in range(len(elliot_df_shortterm)):
-                if signals_elliot_shortterm[i] == "Buy":
-                    fig_elliot.add_trace(go.Scatter(x=[elliot_df_shortterm.index[i]], y=[elliot_df_shortterm["Close"].iloc[i]], mode="markers", 
-                                                   marker=dict(symbol="triangle-up", size=8, color=colors['positive']), name="Buy Signal"))
-                elif signals_elliot_shortterm[i] == "Sell":
-                    fig_elliot.add_trace(go.Scatter(x=[elliot_df_shortterm.index[i]], y=[elliot_df_shortterm["Close"].iloc[i]], mode="markers", 
-                                                   marker=dict(symbol="triangle-down", size=8, color=colors['negative']), name="Sell Signal"))
-            
-            for zone in fib_zones_shortterm:
-                zone_color = 'rgba(0, 255, 0, 0.3)' if zone["type"] == "Buy" else 'rgba(165, 42, 42, 0.3)'  # Grün für Buy, Braun für Sell
-                fig_elliot.add_trace(go.Scatter(x=[elliot_df_shortterm.index[0], elliot_df_shortterm.index[-1], elliot_df_shortterm.index[-1], elliot_df_shortterm.index[0], elliot_df_shortterm.index[0]], 
-                                               y=[zone["start"], zone["start"], zone["end"], zone["end"], zone["start"]], 
-                                               fill="toself", fillcolor=zone_color, 
-                                               opacity=1, line=dict(color="rgba(255,255,255,0)"), 
-                                               showlegend=False, name=f"{zone['type']} Zone"))
-            
-            fig_elliot.add_trace(go.Scatter(x=elliot_df_shortterm.index, y=sma_elliot_shortterm, name="SMA 50", line=dict(color=colors['neutral'], width=1.5)))
-            
-            fig_elliot.update_layout(
-                height=500,  # Reduzierte Höhe für ein kompakteres Layout
-                width=1200,  # Erweiterte Breite für bündigen Look
-                showlegend=False,
-                title_text=f"Elliot Wave (Short-Term) Analyse für {ticker} (1 Minute, aktueller Tag, nur Handelszeiten)",
-                plot_bgcolor=colors['background'],
-                paper_bgcolor=colors['background'],
-                font_color=colors['text'],
-                xaxis=dict(
-                    title="Uhrzeit",
-                    type="date",
-                    tickformat="%H:%M",  # Zeige nur die Uhrzeit (Stunden:Minuten)
-                    rangeslider_visible=False,  # Entferne den Rangeslider für einen sauberen Look
-                    showgrid=False,  # Keine Gitterlinien auf der X-Achse
-                    tickangle=0,  # Horizontale Zeitstempel für bessere Lesbarkeit
-                    tickfont=dict(size=10)  # Kleinere Schriftgröße für Zeit
-                ),
-                yaxis=dict(
-                    title="Preis (USD)",
-                    showgrid=True,  # Feine Gitterlinien auf der Y-Achse
-                    gridcolor='gray',
-                    gridwidth=0.5,
-                    zeroline=False,
-                    tickfont=dict(size=10)  # Kleinere Schriftgröße für Preis
-                ),
-                margin=dict(t=60, b=50, l=50, r=50)  # Anpassung der Ränder für bündigen Look
-            )
-            st.plotly_chart(fig_elliot, use_container_width=True)
-        
-        if show_shortterm_signals:
-            st.header("Elliot Wave (Short-Term) Signale & Zonen")
-            st.markdown(f'<div class="card">', unsafe_allow_html=True)
-            st.write(f"**Aktuelles Signal**: {signals_elliot_shortterm[-1] if signals_elliot_shortterm else 'Hold'}")
-            for zone in fib_zones_shortterm:
-                zone_color = colors['positive'] if zone["type"] == "Buy" else colors['negative']
-                st.markdown(f'<span style="color: {zone_color}">**{zone["type"]} Zone:** {zone["start"]:.2f} - {zone["end"]:.2f}</span>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-        
-        if show_shortterm_stats:
-            st.header("Elliot Wave (Short-Term) Marktstatistiken")
-            st.markdown(f'<div class="card">', unsafe_allow_html=True)
-            st.write(f"**Wave Confidence:** {wave_confidence_shortterm:.2%}")
-            sentiment_text = f"**Sentiment:** {sentiment:.2f} {'(Bullish)' if sentiment > 0 else '(Bearish)' if sentiment < 0 else '(Neutral)'}"
-            st.markdown(f'<span style="color: {colors["positive"] if sentiment > 0 else colors["negative"] if sentiment < 0 else colors["neutral"]}">{sentiment_text}</span>', unsafe_allow_html=True)
-            st.write(f"**Robust:** {'✅' if robust_shortterm else '❌'}")
-            st.markdown('</div>', unsafe_allow_html=True)
+    if buy_signals:
+        st.markdown(f'<div class="card-3d"><div class="text-3d"><p><b>Aktien mit Kaufsignal in {cluster_name}:</b></p><ul>{"".join(f"<li>{ticker}</li>" for ticker in buy_signals)}</ul></div></div>', unsafe_allow_html=True)
+    else:
+        st.markdown(f'<div class="text-3d"><p><b>Keine Kaufsignale in {cluster_name} gefunden.</b></p></div>', unsafe_allow_html=True)
 
-st.sidebar.header("Eingabe-Parameter")
-ticker = st.sidebar.text_input("Aktien-Ticker eingeben (z.B. 'PLTR')", "PLTR", key="ticker_input")
-time_period = st.sidebar.selectbox("Zeitraum (Jahre)", [1, 3, 5, 10], index=2, key="time_period_select")
+# Funktion zum Laden der Lottie-Animation
+def load_lottie_url(url: str):
+    r = requests.get(url)
+    if r.status_code != 200:
+        return None
+    return r.json()
 
-# Sentiment-Schieberegler (Slider) mit kontinuierlichen Werten
-st.sidebar.header("Sentiment Anpassung")
-manual_sentiment = st.sidebar.slider("Manuelles Sentiment (-1 bis 1)", -1.0, 1.0, 0.0, 0.01)  # Schrittgröße 0.01 für kontinuierliche Werte
+# Lottie-Animation laden
+lottie_animation = load_lottie_url("https://lottie.host/f345caf5-6546-46cc-8af2-351bc9988b45/le250UCTFs.json")
 
-st.sidebar.header("Anzeigeoptionen")
-show_standard = st.sidebar.checkbox("Standarddiagramm", value=True, key="show_standard")
-
-with st.sidebar.expander("Elliot Wave (Long-Term)"):
-    show_longterm = st.checkbox("Elliot Wave (Long-Term) Analyse", value=True, key="show_longterm")
-    show_longterm_signals = st.checkbox("Signale & Zonen", value=False, key="show_longterm_signals")
-    show_longterm_stats = st.checkbox("Marktstatistik", value=False, key="show_longterm_stats")
-
-with st.sidebar.expander("Elliot Wave (Short-Term)"):
-    show_shortterm = st.checkbox("Elliot Wave (Short-Term) Analyse", value=False, key="show_shortterm")
-    show_shortterm_signals = st.checkbox("Signale & Zonen", value=False, key="show_shortterm_signals")
-    show_shortterm_stats = st.checkbox("Marktstatistik", value=False, key="show_shortterm_stats")
-
-if st.sidebar.button("Analyse starten", key="analyze_button"):
-    analyze_stock(ticker, time_period, show_standard, show_longterm, show_longterm_signals, show_longterm_stats, show_shortterm, show_shortterm_signals, show_shortterm_stats, manual_sentiment)
-
+# Streamlit-Konfiguration und Design
+st.set_page_config(page_title="Aktienanalyse", layout="wide", initial_sidebar_state="expanded")
 st.markdown("""
-    <footer style="text-align: center; padding: 10px; color: #888;">
-        © 2025 Professionelle Marktanalyse | Erstellt mit Streamlit
-    </footer>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.css" />
+    <script src="https://unpkg.com/lottie-player@latest/dist/lottie-player.js"></script>
+    <style>
+        body {font-family: 'Roboto', sans-serif; background: #1A2526; color: #E6ECEC; overflow-x: hidden;}
+        .main {background: transparent;}
+        .hero {background: linear-gradient(135deg, #1A2526 0%, #2E3839 50%, rgba(0, 200, 151, 0.1) 100%), url('https://www.transparenttextures.com/patterns/asfalt-dark.png'); background-size: cover; padding: 60px 20px; text-align: center; border-radius: 25px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), 0 0 15px rgba(0, 188, 212, 0.3); position: relative; overflow: hidden; margin-bottom: 30px; transition: transform 0.3s ease;}
+        .hero h1 {font-size: 4em; font-weight: 900; color: #FFD700; text-shadow: 0 4px 8px rgba(255, 215, 0, 0.4), 0 0 10px rgba(255, 215, 0, 0.2); margin: 0; animation: fadeInDown 1s ease;}
+        .hero p {font-size: 1.8em; color: #E6ECEC; text-shadow: 0 2px 4px rgba(230, 236, 236, 0.3); margin: 10px 0 0; animation: fadeInUp 1s ease 0.5s forwards; opacity: 0;}
+        .hero:hover {transform: scale(1.02);}
+        .hero::before {content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(0, 188, 212, 0.15), transparent); animation: pulse 10s infinite ease-in-out;}
+        .sidebar .sidebar-content {background: rgba(46, 56, 57, 0.95); backdrop-filter: blur(10px); border-radius: 20px; padding: 25px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3), 0 0 10px rgba(255, 215, 0, 0.2); transition: transform 0.3s ease, box-shadow 0.3s ease;}
+        .sidebar .sidebar-content:hover {transform: translateY(-10px) scale(1.02); box-shadow: 0 15px 40px rgba(0, 0, 0, 0.4), 0 0 15px rgba(255, 215, 0, 0.3);}
+        .sidebar h2 {color: #FFD700; text-shadow: 0 0 5px rgba(255, 215, 0, 0.2); transition: all 0.3s ease;}
+        .sidebar h2:hover {text-shadow: 0 0 10px rgba(255, 215, 0, 0.4);}
+        .sidebar button, .sidebar select, .sidebar input {background: #2E3839; border: 2px solid #00C897; border-radius: 15px; color: #E6ECEC; transition: all 0.3s ease; box-shadow: 0 0 5px rgba(0, 200, 151, 0.2), inset 0 0 3px rgba(255, 215, 0, 0.1);}
+        .sidebar button:hover, .sidebar select:hover, .sidebar input:hover {background: #00C897; box-shadow: 0 0 10px rgba(0, 200, 151, 0.4), 0 0 8px rgba(255, 215, 0, 0.2); transform: scale(1.05); border-color: #FFD700;}
+        .card-3d {background: rgba(46, 56, 57, 0.9); border-radius: 20px; padding: 20px; margin: 20px 0; box-shadow: 0 15px 40px rgba(0, 0, 0, 0.5), 0 0 10px rgba(255, 215, 0, 0.2), 0 5px 10px rgba(255, 215, 0, 0.1); transform: perspective(1000px) translateZ(0) rotateX(5deg); transition: transform 0.3s ease, box-shadow 0.3s ease; backdrop-filter: blur(8px); position: relative;}
+        .card-3d:hover {transform: perspective(1000px) translateZ(15px) rotateX(10deg) scale(1.02); box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 15px rgba(255, 215, 0, 0.3), 0 8px 15px rgba(255, 215, 0, 0.2);}
+        .card-3d::before {content: ''; position: absolute; top: -5%; left: -5%; width: 110%; height: 110%; background: radial-gradient(circle, rgba(255, 215, 0, 0.1), transparent); opacity: 0.3; transition: opacity 0.3s ease;}
+        .card-3d:hover::before {opacity: 0.5;}
+        .header-3d {color: #FFD700; font-size: 2em; font-weight: 900; text-shadow: 0 0 5px rgba(255, 215, 0, 0.2); background: rgba(255, 215, 0, 0.1); border-radius: 15px; padding: 10px; box-shadow: 0 5px 15px rgba(255, 215, 0, 0.2), inset 0 0 3px rgba(255, 215, 0, 0.1); transform: perspective(1000px) translateZ(10px); transition: all 0.3s ease;}
+        .header-3d:hover {text-shadow: 0 0 10px rgba(255, 215, 0, 0.4); transform: perspective(1000px) translateZ(15px) scale(1.05); box-shadow: 0 8px 20px rgba(255, 215, 0, 0.3), inset 0 0 5px rgba(255, 215, 0, 0.2);}
+        .text-3d {color: #E6ECEC; font-size: 1em; transition: all 0.3s ease; transform: perspective(1000px) translateZ(5px); background: rgba(46, 56, 57, 0.8); border-radius: 10px; padding: 10px; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3), inset 0 0 3px rgba(230, 236, 236, 0.1), 0 2px 5px rgba(255, 215, 0, 0.1); margin-top: 10px;}
+        .text-3d:hover {transform: perspective(1000px) translateZ(10px) scale(1.02); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4), inset 0 0 5px rgba(230, 236, 236, 0.2), 0 3px 8px rgba(255, 215, 0, 0.2);}
+        @keyframes pulse {0% {transform: scale(1); opacity: 0.15;} 50% {transform: scale(1.1); opacity: 0.25;} 100% {transform: scale(1); opacity: 0.15;}}
+        @keyframes fadeInDown {from {opacity: 0; transform: translateY(-20px);} to {opacity: 1; transform: translateY(0);}}
+        @keyframes fadeInUp {from {opacity: 0; transform: translateY(20px);} to {opacity: 1; transform: translateY(0);}}
+        .footer {background: linear-gradient(45deg, #2E3839, #1A2526); padding: 20px; text-align: center; border-top: 2px solid #00C897; box-shadow: 0 -10px 20px rgba(0, 0, 0, 0.3), 0 -5px 10px rgba(255, 215, 0, 0.1); transition: all 0.3s ease;}
+        .footer:hover {box-shadow: 0 -15px 30px rgba(0, 0, 0, 0.4), 0 -8px 15px rgba(255, 215, 0, 0.2);}
+        .scroll-to-top {position: fixed; bottom: 20px; right: 20px; background: #00C897; color: #FFFFFF; border: none; border-radius: 50%; width: 50px; height: 50px; font-size: 24px; cursor: pointer; box-shadow: 0 0 10px rgba(0, 200, 151, 0.4), 0 0 5px rgba(255, 215, 0, 0.2); transition: all 0.3s ease; z-index: 9999; opacity: 0; transform: translateY(50px); animation: fadeIn 0.5s ease-in-out 2s forwards;}
+        .scroll-to-top:hover {transform: scale(1.2) rotate(360deg); box-shadow: 0 0 15px rgba(0, 200, 151, 0.6), 0 0 8px rgba(255, 215, 0, 0.3); background: #FFD700;}
+        @keyframes fadeIn {from {opacity: 0; transform: translateY(50px);} to {opacity: 1; transform: translateY(0);}}
+        .stExpander {background-color: rgba(46, 56, 57, 0.9); border: 2px solid #00C897; border-radius: 15px; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3), 0 0 5px rgba(255, 215, 0, 0.1); transition: all 0.3s ease;}
+        .stExpander:hover {box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4), 0 0 8px rgba(255, 215, 0, 0.2);}
+        .stExpander > div > div {background-color: transparent;}
+        .stExpander > div > div > p {color: #E6ECEC;}
+        .stCheckbox > div > label {color: #E6ECEC; transition: all 0.3s ease;}
+        .stCheckbox > div > label:hover {color: #FFD700; text-shadow: 0 0 5px rgba(255, 215, 0, 0.2);}}
+        .loading-container {position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(26, 37, 38, 0.9); z-index: 9999; display: flex; justify-content: center; align-items: center;}
+        .loading-container lottie-player {width: 250px; height: 250px;}
+    </style>
+""", unsafe_allow_html=True)
+
+# Placeholder für die Ladeanimation
+loading_placeholder = st.empty()
+
+# Hero-Bereich mit Abstand
+st.markdown("""
+    <div style="height: 20px;"></div>  <!-- Zeile Abstand -->
+    <div class="hero">
+        <h1>Stock - Analyzer</h1>
+        <p>Elliot - Wave</p>
+    </div>
+""", unsafe_allow_html=True)
+
+# Sidebar
+st.sidebar.markdown("<h2>📈 Marktanalyse-Konfiguration</h2>", unsafe_allow_html=True)
+st.sidebar.subheader("1. Wähle einen Markt-Cluster")
+selected_cluster = st.sidebar.radio("Wähle einen Cluster:", ["Tech 33", "DAX 40", "US Titans", "China Titans", "Eigene Auswahl"], index=None, horizontal=True)
+
+ticker = None
+if selected_cluster:
+    if selected_cluster == "Eigene Auswahl":
+        st.sidebar.subheader("2. Gib eine Aktie ein")
+        ticker = st.sidebar.text_input("Aktien-Ticker eingeben (z.B. 'AAPL' oder 'ALV.DE')", key="custom_ticker")
+    else:
+        st.sidebar.subheader("2. Wähle eine Aktie (optional)")
+        selected_stock = st.sidebar.selectbox("Aktie auswählen:", ["Keine Auswahl"] + sorted(clusters[selected_cluster]), key="stock_select")
+        if selected_stock and selected_stock != "Keine Auswahl":
+            ticker = selected_stock.split(" - ")[1]
+
+st.sidebar.subheader("3. Analysenzeitraum")
+time_period = st.sidebar.selectbox("Analysezeitraum (Jahre):", [1, 3, 5, 10], index=2)
+
+st.sidebar.subheader("4. Marktsentiment")
+manual_sentiment = st.sidebar.slider("Marktsentiment anpassen (-1 = Bearish, 0 = Neutral, 1 = Bullish)", -1.0, 1.0, 0.0, 0.01)
+
+st.sidebar.subheader("5. Analyseart")
+show_standard = st.sidebar.checkbox("Standardanalyse anzeigen", value=True)
+show_longterm = st.sidebar.checkbox("Elliot-Wave-Analyse anzeigen", value=False)
+
+if st.sidebar.button("🚀 Analyse starten", key="analyze_button"):
+    # Ladeanimation anzeigen
+    with loading_placeholder.container():
+        st_lottie(lottie_animation, height=200, key="loading")
+        time.sleep(3)  # Simulierte Verzögerung
+    
+    # Ladeanimation entfernen
+    loading_placeholder.empty()
+    
+    # Analyse ausführen
+    if ticker:
+        analyze_stock(ticker, time_period, show_standard, show_longterm, True, True, manual_sentiment)
+    elif selected_cluster:
+        analyze_cluster_for_buy_signals(selected_cluster, manual_sentiment)
+
+# Footer
+st.markdown("""
+    <div class="footer">
+        © 2025 Aktienanalyse | Erstellt mit Streamlit
+    </div>
+    <button class="scroll-to-top" onclick="window.scrollTo({top: 0, behavior: 'smooth'})">↑</button>
 """, unsafe_allow_html=True)
