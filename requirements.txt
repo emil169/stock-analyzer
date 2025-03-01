@@ -8,4 +8,4 @@ scipy
 textblob
 scikit-learn
 plotly
-st_lottie
+streamlit-lottie
