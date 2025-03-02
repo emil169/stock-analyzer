@@ -15,6 +15,17 @@ from textblob import TextBlob
 from sklearn.ensemble import RandomForestClassifier
 import plotly.graph_objects as go
 from pytz import timezone
+import quandl
+import fredapi
+
+# API-Schlüssel
+QUANDL_API_KEY = "uoRuWS3U8jNSy1w1bwSU"
+FRED_API_KEY = "a55a8228d224050a5568c0efc07603c1"
+FINNHUB_API_KEY = "cv2a6mhr01qhefsj1qhgcv2a6mhr01qhefsj1qi0"
+ALPHA_VANTAGE_API_KEY = "16N6ZLU93G441V8E"
+
+# FRED API initialisieren
+fred = fredapi.Fred(api_key=FRED_API_KEY)
 
 # --- Globale Konfiguration ---
 colors = {
@@ -69,7 +80,33 @@ clusters = {
     "Eigene Auswahl": []
 }
 
-# Funktionen (unverändert)
+# Neue Funktion zum Abrufen makroökonomischer Daten von FRED
+def fetch_macro_data(start_date, end_date):
+    try:
+        # Inflationsrate (CPIAUCSL - Consumer Price Index)
+        inflation = fred.get_series('CPIAUCSL', start_date, end_date)
+        inflation = inflation.pct_change(12) * 100  # Jährliche Inflationsrate
+        
+        # Arbeitslosenrate (UNRATE)
+        unemployment = fred.get_series('UNRATE', start_date, end_date)
+        
+        # Zinssatz (FEDFUNDS - Federal Funds Rate)
+        interest_rate = fred.get_series('FEDFUNDS', start_date, end_date)
+        
+        macro_df = pd.DataFrame({
+            'Inflation': inflation,
+            'Unemployment': unemployment,
+            'InterestRate': interest_rate
+        }).dropna()
+        
+        # Zeitzone entfernen, um mit yfinance-Daten kompatibel zu sein
+        macro_df.index = macro_df.index.tz_localize(None)
+        
+        return macro_df
+    except Exception as e:
+        st.warning(f"Fehler beim Abrufen makroökonomischer Daten: {str(e)}")
+        return pd.DataFrame()
+
 def get_stock_info(symbol):
     try:
         stock = yf.Ticker(symbol)
@@ -171,7 +208,8 @@ def calculate_atr(data, period=14):
     data['ATR'] = tr.rolling(window=period).mean()
     return data
 
-def generate_signals(data, current_price, sentiment=0):
+# Anpassung der Signalgenerierung mit makroökonomischen Faktoren
+def generate_signals(data, current_price, sentiment=0, macro_df=None):
     rsi = calculate_rsi(data)
     data = calculate_bollinger_bands(data)
     data = calculate_ema(data)
@@ -207,32 +245,47 @@ def generate_signals(data, current_price, sentiment=0):
     long_signals = 0
     short_signals = 0
 
+    # Makroökonomische Faktoren einbeziehen
+    macro_factor = 0
+    if macro_df is not None and not macro_df.empty:
+        latest_macro = macro_df.iloc[-1]
+        inflation = latest_macro['Inflation']
+        unemployment = latest_macro['Unemployment']
+        interest_rate = latest_macro['InterestRate']
+        
+        # Höhere Inflation und Zinsen könnten Short-Signale verstärken
+        if inflation > 3 or interest_rate > 2:
+            macro_factor -= 0.5
+        # Niedrige Arbeitslosenrate könnte Long-Signale verstärken
+        if unemployment < 5:
+            macro_factor += 0.5
+
     if current_rsi < 45 and current_price < lower_band:
-        long_signals += 1 + (sentiment_factor * 0.5)
+        long_signals += 1 + (sentiment_factor * 0.5) + macro_factor
     if current_k < 45 and current_d < 45:
-        long_signals += 1 + (sentiment_factor * 0.5)
+        long_signals += 1 + (sentiment_factor * 0.5) + macro_factor
     if current_price < ema50 and current_price < current_vwap:
-        long_signals += 1 + (sentiment_factor * 0.5)
+        long_signals += 1 + (sentiment_factor * 0.5) + macro_factor
     if current_obv > prev_obv:
-        long_signals += 1 + (sentiment_factor * 0.5)
+        long_signals += 1 + (sentiment_factor * 0.5) + macro_factor
     if current_macd > current_signal and macd.iloc[-2] <= signal_line.iloc[-2]:
-        long_signals += 1 + (sentiment_factor * 0.5)
+        long_signals += 1 + (sentiment_factor * 0.5) + macro_factor
 
     if current_rsi > 55 and current_price > upper_band:
-        short_signals += 1 - (sentiment_factor * 0.5)
+        short_signals += 1 - (sentiment_factor * 0.5) + macro_factor
     if current_k > 55 and current_d > 55:
-        short_signals += 1 - (sentiment_factor * 0.5)
+        short_signals += 1 - (sentiment_factor * 0.5) + macro_factor
     if current_price > ema50 and current_price > current_vwap:
-        short_signals += 1 - (sentiment_factor * 0.5)
+        short_signals += 1 - (sentiment_factor * 0.5) + macro_factor
     if current_obv < prev_obv:
-        short_signals += 1 - (sentiment_factor * 0.5)
+        short_signals += 1 - (sentiment_factor * 0.5) + macro_factor
     if current_macd < current_signal and macd.iloc[-2] >= signal_line.iloc[-2]:
-        short_signals += 1 - (sentiment_factor * 0.5)
+        short_signals += 1 - (sentiment_factor * 0.5) + macro_factor
 
     base_confidence = 20
     if long_signals >= 3:
         base_score = long_signals * base_confidence
-        confidence_adjustment = sentiment_factor * 15
+        confidence_adjustment = (sentiment_factor + macro_factor) * 15
         confidence_score = min(100, max(0, base_score + confidence_adjustment))
         entry_range_buy = f"{max(current_price * 0.98, lower_band * 0.98):.2f}–{lower_band:.2f}"
         exit_range_sell = f"{ema50 * 1.10:.2f}–{upper_band * 1.05:.2f}"
@@ -245,7 +298,7 @@ def generate_signals(data, current_price, sentiment=0):
                          f"Stop-Loss: {stop_loss:.2f}, Profit-Take: {profit_take:.2f}, Konfidenz: {confidence_score}%")
     elif short_signals >= 3:
         base_score = short_signals * base_confidence
-        confidence_adjustment = -sentiment_factor * 15
+        confidence_adjustment = -(sentiment_factor + macro_factor) * 15
         confidence_score = min(100, max(0, base_score + confidence_adjustment))
         entry_range_buy = f"{upper_band:.2f}–{min(current_price * 1.02, upper_band * 1.02):.2f}"
         exit_range_sell = f"{ema50 * 0.90:.2f}–{lower_band * 0.95:.2f}"
@@ -263,11 +316,11 @@ def generate_signals(data, current_price, sentiment=0):
 
     return recommendation, signal_type, entry_range_buy, exit_range_sell, price_increase_forecast, confidence_score, stop_loss, profit_take
 
-def backtest_signals(data, ticker, sentiment=0, period="1y"):
+def backtest_signals(data, ticker, sentiment=0, period="1y", macro_df=None):
     elliot_data = fetch_data(ticker, timeframe="1d", period=period)
     if not elliot_data.empty and len(elliot_data) > 50:
         elliot_data.loc[elliot_data.index[-1], 'Close'] = data['Close'].iloc[-1]
-        signals_elliot = generate_signals_elliot(elliot_data, sentiment)
+        signals_elliot = generate_signals_elliot(elliot_data, sentiment, macro_df)
     else:
         signals_elliot = ["Hold"] * len(data)
 
@@ -284,7 +337,8 @@ def backtest_signals(data, ticker, sentiment=0, period="1y"):
     for i in range(20, min_length - 10):
         temp_data = data.iloc[:i]
         current_price = temp_data['Close'].iloc[-1]
-        rec_standard, signal_type, _, _, _, _, _, _ = generate_signals(temp_data, current_price, sentiment)
+        macro_slice = macro_df.loc[:temp_data.index[-1]] if macro_df is not None and not macro_df.empty else None
+        rec_standard, signal_type, _, _, _, _, _, _ = generate_signals(temp_data, current_price, sentiment, macro_slice)
         signal_elliot = signals_elliot[i]
 
         if "Kaufsignal" in rec_standard or signal_elliot == "Buy":
@@ -317,6 +371,8 @@ def backtest_signals(data, ticker, sentiment=0, period="1y"):
 
 def calculate_correlation(data, ticker):
     sp500 = yf.Ticker("^GSPC").history(start=data.index[0], end=data.index[-1])['Close']
+    # Zeitzone von sp500 entfernen, um mit data kompatibel zu sein
+    sp500.index = sp500.index.tz_localize(None)
     correlation = data['Close'].corr(sp500)
     return f"Korrelation mit S&P 500: {correlation:.2f}"
 
@@ -342,7 +398,7 @@ def detect_waves_in_image(img):
     peaks = argrelextrema(edges, np.greater, order=10)[0]
     return peaks
 
-def identify_elliot_waves(df, sentiment=0):
+def identify_elliot_waves(df, sentiment=0, macro_df=None):
     if df.empty: return [], 0.5, []
     highs = argrelextrema(df["High"].values, np.greater, order=5)[0]
     lows = argrelextrema(df["Low"].values, np.less, order=5)[0]
@@ -352,7 +408,14 @@ def identify_elliot_waves(df, sentiment=0):
                         "W4": df["Close"].iloc[highs[i+1]], "W5": df["Close"].iloc[lows[i+2]]}
         waves.append(wave_pattern)
     
-    features = pd.DataFrame({"rsi": calculate_rsi(df), "macd": calculate_macd(df)[0], "volatility": df["Close"].pct_change().rolling(14).std(), "sentiment": sentiment}).dropna()
+    features = pd.DataFrame({"rsi": calculate_rsi(df), "macd": calculate_macd(df)[0], "volatility": df["Close"].pct_change().rolling(14).std(), "sentiment": sentiment})
+    if macro_df is not None and not macro_df.empty:
+        macro_df = macro_df.reindex(features.index, method='ffill')
+        features['inflation'] = macro_df['Inflation']
+        features['unemployment'] = macro_df['Unemployment']
+        features['interest_rate'] = macro_df['InterestRate']
+    features = features.dropna()
+    
     valid_indices = features.index[features.index <= df.index[-1]] if not df.index.empty else features.index[:1] if not features.empty else pd.Index([0])
     if len(valid_indices) == 0 and not features.empty: valid_indices = features.index[:1]
     
@@ -397,17 +460,28 @@ def calculate_fibonacci_levels(df):
     zones = [{"start": levels[4], "end": levels[3], "type": "Buy"}, {"start": levels[1], "end": levels[0], "type": "Sell"}]
     return levels, zones
 
-def generate_signals_elliot(df, sentiment=0):
+def generate_signals_elliot(df, sentiment=0, macro_df=None):
     if df.empty: return []
     sma = calculate_sma(df)
     rsi = calculate_rsi(df)
     signals = []
+    macro_factor = 0
+    if macro_df is not None and not macro_df.empty:
+        latest_macro = macro_df.iloc[-1]
+        inflation = latest_macro['Inflation']
+        unemployment = latest_macro['Unemployment']
+        interest_rate = latest_macro['InterestRate']
+        if inflation > 3 or interest_rate > 2:
+            macro_factor -= 0.5
+        if unemployment < 5:
+            macro_factor += 0.5
+
     for i in range(len(df)):
         signal = "Hold"
         sentiment_factor = max(-1, min(1, sentiment))
-        if df["Close"].iloc[i] > sma.iloc[i] and rsi.iloc[i] > 70 + (sentiment_factor * 10):
+        if df["Close"].iloc[i] > sma.iloc[i] and rsi.iloc[i] > (70 + (sentiment_factor * 10) + macro_factor * 10):
             signal = "Sell"
-        elif df["Close"].iloc[i] < sma.iloc[i] and rsi.iloc[i] < 30 - (sentiment_factor * 10):
+        elif df["Close"].iloc[i] < sma.iloc[i] and rsi.iloc[i] < (30 - (sentiment_factor * 10) - macro_factor * 10):
             signal = "Buy"
         signals.append(signal)
     return signals
@@ -436,6 +510,15 @@ def analyze_stock(ticker, years=5, show_standard=True, show_longterm=True, show_
     stock = yf.Ticker(ticker)
     data = stock.history(start=start_date, end=end_date)
     
+    # Makroökonomische Daten abrufen
+    macro_df = fetch_macro_data(start_date, end_date)
+    
+    # Zeitzone von yfinance-Daten entfernen
+    data.index = data.index.tz_localize(None)
+    
+    # macro_df an data.index anpassen
+    macro_df = macro_df.reindex(data.index, method='ffill')
+    
     data = data.dropna()
     if len(data) < 50:
         st.error(f"Unzureichende Daten für {ticker}. Mindestens 50 Datenpunkte erforderlich.")
@@ -457,19 +540,22 @@ def analyze_stock(ticker, years=5, show_standard=True, show_longterm=True, show_
     data = calculate_atr(data)
     
     sentiment = get_sentiment(ticker, manual_sentiment)
-    recommendation, signal_type, entry_range_buy, exit_range_sell, price_increase_forecast, confidence_score, stop_loss, profit_take = generate_signals(data, current_price, sentiment)
-    backtest_result = backtest_signals(data, ticker, sentiment, period=f"{years}y")
+    recommendation, signal_type, entry_range_buy, exit_range_sell, price_increase_forecast, confidence_score, stop_loss, profit_take = generate_signals(data, current_price, sentiment, macro_df)
+    backtest_result = backtest_signals(data, ticker, sentiment, period=f"{years}y", macro_df=macro_df)
     
     elliot_df_longterm = fetch_data(ticker, timeframe="1d", period="1y")
     if not elliot_df_longterm.empty:
+        elliot_df_longterm.index = elliot_df_longterm.index.tz_localize(None)  # Zeitzone entfernen
         elliot_df_longterm.loc[elliot_df_longterm.index[-1], 'Close'] = current_price
         elliot_df_longterm.loc[elliot_df_longterm.index[-1], 'Open'] = current_price
         elliot_df_longterm.loc[elliot_df_longterm.index[-1], 'High'] = current_price
         elliot_df_longterm.loc[elliot_df_longterm.index[-1], 'Low'] = current_price
-    waves_longterm, wave_confidence_longterm, waves_ki_longterm = identify_elliot_waves(elliot_df_longterm, sentiment) if not elliot_df_longterm.empty else ([], 0.5, [])
+    macro_df_longterm = fetch_macro_data(elliot_df_longterm.index[0], elliot_df_longterm.index[-1]) if not elliot_df_longterm.empty else pd.DataFrame()
+    macro_df_longterm = macro_df_longterm.reindex(elliot_df_longterm.index, method='ffill') if not elliot_df_longterm.empty else pd.DataFrame()
+    waves_longterm, wave_confidence_longterm, waves_ki_longterm = identify_elliot_waves(elliot_df_longterm, sentiment, macro_df_longterm) if not elliot_df_longterm.empty else ([], 0.5, [])
     sma_elliot_longterm = calculate_sma(elliot_df_longterm)
     fib_levels_longterm, fib_zones_longterm = calculate_fibonacci_levels(elliot_df_longterm)
-    signals_elliot_longterm = generate_signals_elliot(elliot_df_longterm, sentiment)
+    signals_elliot_longterm = generate_signals_elliot(elliot_df_longterm, sentiment, macro_df_longterm)
     robust_longterm = robustness_check(elliot_df_longterm, waves_longterm)
     
     col1, col2 = st.columns([1, 2])
@@ -504,8 +590,7 @@ def analyze_stock(ticker, years=5, show_standard=True, show_longterm=True, show_
         st.markdown('</div>', unsafe_allow_html=True)
     
     st.markdown(f'<div class="card-3d"><h2 class="header-3d">Zusammenfassung und Risikoanalyse</h2>'
-                f'<div class="text-3d"><p>{calculate_correlation(data, ticker)}</p><p>{backtest_result}</p></div></div>', unsafe_allow_html=True)
-    
+                f'<div class="text-3d"><p>{calculate_correlation(data, ticker)}</p><p>{backtest_result}</p></div></div>', unsafe_allow_html=True)    
     if show_standard:
         st.markdown(f'<div class="card-3d"><h2 class="header-3d">Standardanalyse</h2></div>', unsafe_allow_html=True)
         fig, axes = plt.subplots(4, 1, figsize=(15, 16), facecolor=colors['background'])
@@ -691,7 +776,8 @@ def analyze_cluster_for_buy_signals(cluster_name, manual_sentiment=0):
                 data.loc[data.index[-1], 'Open'] = current_price
                 data.loc[data.index[-1], 'High'] = current_price
                 data.loc[data.index[-1], 'Low'] = current_price
-                signals_elliot = generate_signals_elliot(data, manual_sentiment)
+                macro_df = fetch_macro_data(data.index[0], data.index[-1])
+                signals_elliot = generate_signals_elliot(data, manual_sentiment, macro_df)
                 if signals_elliot[-1] == "Buy":
                     buy_signals.append(ticker)
         else:
