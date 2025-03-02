@@ -1,3 +1,4 @@
+import streamlit as st
 from streamlit_lottie import st_lottie
 import requests
 import time
@@ -6,7 +7,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-import streamlit as st
 from datetime import datetime, timedelta
 from scipy.signal import argrelextrema
 from PIL import Image
@@ -18,11 +18,11 @@ from pytz import timezone
 import quandl
 import fredapi
 
-# API-Schlüssel
-QUANDL_API_KEY = "uoRuWS3U8jNSy1w1bwSU"
-FRED_API_KEY = "a55a8228d224050a5568c0efc07603c1"
-FINNHUB_API_KEY = "cv2a6mhr01qhefsj1qhgcv2a6mhr01qhefsj1qi0"
-ALPHA_VANTAGE_API_KEY = "16N6ZLU93G441V8E"
+# API-Schlüssel aus Streamlit Secrets laden
+QUANDL_API_KEY = st.secrets["QUANDL_API_KEY"]
+FRED_API_KEY = st.secrets["FRED_API_KEY"]
+FINNHUB_API_KEY = st.secrets["FINNHUB_API_KEY"]
+ALPHA_VANTAGE_API_KEY = st.secrets["ALPHA_VANTAGE_API_KEY"]
 
 # FRED API initialisieren
 fred = fredapi.Fred(api_key=FRED_API_KEY)
