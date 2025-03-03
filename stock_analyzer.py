@@ -245,7 +245,7 @@ def generate_signals(data, current_price, sentiment=0, macro_df=None):
     long_signals = 0
     short_signals = 0
 
-    # Makroökonomische Faktoren einbeziehen
+    # Makroökonomische Faktoren einbeziehen, falls macro_df vorhanden
     macro_factor = 0
     if macro_df is not None and not macro_df.empty:
         latest_macro = macro_df.iloc[-1]
@@ -371,7 +371,6 @@ def backtest_signals(data, ticker, sentiment=0, period="1y", macro_df=None):
 
 def calculate_correlation(data, ticker):
     sp500 = yf.Ticker("^GSPC").history(start=data.index[0], end=data.index[-1])['Close']
-    # Zeitzone von sp500 entfernen, um mit data kompatibel zu sein
     sp500.index = sp500.index.tz_localize(None)
     correlation = data['Close'].corr(sp500)
     return f"Korrelation mit S&P 500: {correlation:.2f}"
@@ -491,7 +490,7 @@ def robustness_check(df, waves):
     z_scores = np.abs((df["Close"] - df["Close"].mean()) / df["Close"].std())
     return not (z_scores > 3).any()
 
-def analyze_stock(ticker, years=5, show_standard=True, show_longterm=True, show_longterm_signals=True, show_longterm_stats=True, manual_sentiment=None):
+def analyze_stock(ticker, years=5, show_standard=True, show_longterm=True, show_longterm_signals=True, show_longterm_stats=True, manual_sentiment=None, macro_df=None):
     stock_info = get_stock_info(ticker)
     if stock_info is None or isinstance(stock_info, str):
         st.error(stock_info[1] if isinstance(stock_info, tuple) else "Keine Daten verfügbar")
@@ -510,14 +509,12 @@ def analyze_stock(ticker, years=5, show_standard=True, show_longterm=True, show_
     stock = yf.Ticker(ticker)
     data = stock.history(start=start_date, end=end_date)
     
-    # Makroökonomische Daten abrufen
-    macro_df = fetch_macro_data(start_date, end_date)
-    
     # Zeitzone von yfinance-Daten entfernen
     data.index = data.index.tz_localize(None)
     
-    # macro_df an data.index anpassen
-    macro_df = macro_df.reindex(data.index, method='ffill')
+       # macro_df nur verwenden, wenn es übergeben wurde
+    if macro_df is not None:
+        macro_df = macro_df.reindex(data.index, method='ffill')
     
     data = data.dropna()
     if len(data) < 50:
@@ -545,13 +542,14 @@ def analyze_stock(ticker, years=5, show_standard=True, show_longterm=True, show_
     
     elliot_df_longterm = fetch_data(ticker, timeframe="1d", period="1y")
     if not elliot_df_longterm.empty:
-        elliot_df_longterm.index = elliot_df_longterm.index.tz_localize(None)  # Zeitzone entfernen
+        elliot_df_longterm.index = elliot_df_longterm.index.tz_localize(None)
         elliot_df_longterm.loc[elliot_df_longterm.index[-1], 'Close'] = current_price
         elliot_df_longterm.loc[elliot_df_longterm.index[-1], 'Open'] = current_price
         elliot_df_longterm.loc[elliot_df_longterm.index[-1], 'High'] = current_price
         elliot_df_longterm.loc[elliot_df_longterm.index[-1], 'Low'] = current_price
-    macro_df_longterm = fetch_macro_data(elliot_df_longterm.index[0], elliot_df_longterm.index[-1]) if not elliot_df_longterm.empty else pd.DataFrame()
-    macro_df_longterm = macro_df_longterm.reindex(elliot_df_longterm.index, method='ffill') if not elliot_df_longterm.empty else pd.DataFrame()
+    macro_df_longterm = fetch_macro_data(elliot_df_longterm.index[0], elliot_df_longterm.index[-1]) if not elliot_df_longterm.empty and macro_df is not None else None
+    if macro_df_longterm is not None:
+        macro_df_longterm = macro_df_longterm.reindex(elliot_df_longterm.index, method='ffill')
     waves_longterm, wave_confidence_longterm, waves_ki_longterm = identify_elliot_waves(elliot_df_longterm, sentiment, macro_df_longterm) if not elliot_df_longterm.empty else ([], 0.5, [])
     sma_elliot_longterm = calculate_sma(elliot_df_longterm)
     fib_levels_longterm, fib_zones_longterm = calculate_fibonacci_levels(elliot_df_longterm)
@@ -590,7 +588,8 @@ def analyze_stock(ticker, years=5, show_standard=True, show_longterm=True, show_
         st.markdown('</div>', unsafe_allow_html=True)
     
     st.markdown(f'<div class="card-3d"><h2 class="header-3d">Zusammenfassung und Risikoanalyse</h2>'
-                f'<div class="text-3d"><p>{calculate_correlation(data, ticker)}</p><p>{backtest_result}</p></div></div>', unsafe_allow_html=True)    
+                f'<div class="text-3d"><p>{calculate_correlation(data, ticker)}</p><p>{backtest_result}</p></div></div>', unsafe_allow_html=True)
+    
     if show_standard:
         st.markdown(f'<div class="card-3d"><h2 class="header-3d">Standardanalyse</h2></div>', unsafe_allow_html=True)
         fig, axes = plt.subplots(4, 1, figsize=(15, 16), facecolor=colors['background'])
@@ -772,12 +771,13 @@ def analyze_cluster_for_buy_signals(cluster_name, manual_sentiment=0):
             current_price = stock_info["current_price"]
             data = fetch_data(ticker, timeframe="1d", period="1y")
             if not data.empty and len(data) >= 50:
+                data.index = data.index.tz_localize(None)
                 data.loc[data.index[-1], 'Close'] = current_price
                 data.loc[data.index[-1], 'Open'] = current_price
                 data.loc[data.index[-1], 'High'] = current_price
                 data.loc[data.index[-1], 'Low'] = current_price
-                macro_df = fetch_macro_data(data.index[0], data.index[-1])
-                signals_elliot = generate_signals_elliot(data, manual_sentiment, macro_df)
+                # Keine Makrodaten für Cluster-Analyse
+                signals_elliot = generate_signals_elliot(data, manual_sentiment, macro_df=None)
                 if signals_elliot[-1] == "Buy":
                     buy_signals.append(ticker)
         else:
@@ -883,18 +883,20 @@ show_standard = st.sidebar.checkbox("Standardanalyse anzeigen", value=True)
 show_longterm = st.sidebar.checkbox("Elliot-Wave-Analyse anzeigen", value=False)
 
 if st.sidebar.button("🚀 Analyse starten", key="analyze_button"):
-    # Ladeanimation anzeigen
     with loading_placeholder.container():
         st_lottie(lottie_animation, height=200, key="loading")
-        time.sleep(3)  # Simulierte Verzögerung
+        time.sleep(1)  # Verkürzte Zeit für Demo
     
-    # Ladeanimation entfernen
     loading_placeholder.empty()
     
-    # Analyse ausführen
     if ticker:
-        analyze_stock(ticker, time_period, show_standard, show_longterm, True, True, manual_sentiment)
+        # Nur wenn eine Aktie ausgewählt ist, laden wir Makrodaten
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=time_period * 365)
+        macro_df = fetch_macro_data(start_date, end_date)
+        analyze_stock(ticker, time_period, show_standard, show_longterm, True, True, manual_sentiment, macro_df=macro_df)
     elif selected_cluster:
+        # Cluster-Analyse ohne Makrodaten
         analyze_cluster_for_buy_signals(selected_cluster, manual_sentiment)
 
 # Footer
